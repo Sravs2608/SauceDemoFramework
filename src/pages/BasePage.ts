@@ -7,11 +7,13 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { Header } from './components/Header';
 import { Menu } from './components/Menu';
+import { Footer } from './components/Footer';
 
 export abstract class BasePage {
   readonly page: Page;
   readonly header: Header;
   readonly menu: Menu;
+  readonly footer: Footer;
   /** The heading under the header bar, e.g. "Products" or "Your Cart". */
   readonly title: Locator;
 
@@ -24,6 +26,7 @@ export abstract class BasePage {
     this.page = page;
     this.header = new Header(page);
     this.menu = new Menu(page);
+    this.footer = new Footer(page);
     this.title = page.getByTestId('title');
   }
 

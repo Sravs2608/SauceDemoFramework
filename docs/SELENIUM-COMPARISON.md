@@ -1342,3 +1342,420 @@ Correct, Selenium has none; AShot or a visual-testing service is the workaround.
 - Dynamic content (dates, random prices, adverts) must be masked or the test is flaky.
 - Pixel comparison finds differences; it cannot judge whether a design *looks good*. That
   stays a manual check.
+
+---
+
+# Phase 3 topics
+
+The tests for these topics are in `tests/advanced/`. The plan gives its section 6 topics no
+test IDs, so they are numbered ADV-01 to ADV-08 (NET-01 and A11Y-01 keep their plan IDs).
+Advanced locators (ADV-01, `tests/advanced/locators.spec.ts`) extend section 2 above.
+
+## 17. Browser contexts: several users in one test
+
+**File:** `tests/advanced/contexts.spec.ts` (ADV-02)
+
+### 1. What it does
+A browser context is a separate, private browser session inside one running browser: own
+cookies, own localStorage, own login. One test opens two contexts and acts as two users at
+once, proving their sessions and carts do not mix.
+
+### 2. Playwright (our code)
+```ts
+const contextA = await browser.newContext({ baseURL, storageState: loggedOut });
+const contextB = await browser.newContext({ baseURL, storageState: loggedOut });
+const pageA = await contextA.newPage();
+const pageB = await contextB.newPage();
+
+await new LoginPage(pageA).login(users.standard);
+await new LoginPage(pageB).login(users.visual);
+// ...A adds two products, B adds one...
+await inventoryA.header.expectCartCount(2);
+await inventoryB.header.expectCartCount(1);
+```
+
+### 3. Selenium Java equivalent
+```java
+WebDriver driverA = new ChromeDriver();   // a second, complete browser
+WebDriver driverB = new ChromeDriver();
+try {
+    driverA.get(baseUrl);
+    new LoginPage(driverA).login(Users.STANDARD);
+    driverB.get(baseUrl);
+    new LoginPage(driverB).login(Users.VISUAL);
+    // ...A adds two products, B adds one...
+    assertEquals("2", driverA.findElement(By.cssSelector("[data-test='shopping-cart-badge']")).getText());
+    assertEquals("1", driverB.findElement(By.cssSelector("[data-test='shopping-cart-badge']")).getText());
+} finally {
+    driverA.quit();
+    driverB.quit();
+}
+```
+
+### 4. Key differences
+| | Playwright context | Selenium |
+|---|---|---|
+| Isolation unit | Context (many per browser) | WebDriver = whole browser process |
+| Cost | Milliseconds, little memory | Seconds and a full browser each |
+| New tab / window | Shares the context's cookies | `switchTo().newWindow()` also shares cookies: no isolation |
+| Per-test isolation | Automatic (`page` fixture = new context per test) | A new driver per test, or manual cookie cleanup |
+
+### 5. Which is better here and why
+Playwright. Contexts are the reason every test in this framework is isolated *and* fast,
+and they make multi-user scenarios (buyer and seller, admin and customer) ordinary tests.
+
+### 6. No direct equivalent?
+Selenium has no context concept. Workaround: one `WebDriver` per user. (Chromium's
+incognito windows through DevTools exist but are not portable.)
+
+---
+
+## 18. Browser events: alerts and new tabs
+
+**File:** `tests/advanced/events.spec.ts` (ADV-03, ADV-04)
+
+### 1. What it does
+Some things are done by the browser, not by the page: a JavaScript alert pops up, or a
+link opens a new tab. The test has to notice the event and deal with it.
+
+### 2. Playwright (our code)
+```ts
+// Alert: register the handler BEFORE the action that triggers it
+page.once('dialog', (dialog) => {
+  dialogMessage = dialog.message();
+  void dialog.accept();
+});
+await inventoryPage.sortBy(sortOptions.nameDesc);
+
+// New tab: first say what we wait for, then click
+const newTabPromise = page.waitForEvent('popup');
+await inventoryPage.footer.linkedInLink.click();
+const newTab = await newTabPromise;
+await expect(newTab).toHaveURL('https://www.linkedin.com/company/sauce-labs/');
+await newTab.close();
+await inventoryPage.expectLoaded();          // the original tab needs no "switch back"
+```
+
+### 3. Selenium Java equivalent
+```java
+// Alert: act first, then switch to it
+new Select(driver.findElement(By.cssSelector("[data-test='product-sort-container']"))).selectByValue("za");
+Alert alert = wait.until(ExpectedConditions.alertIsPresent());
+assertEquals("Sorting is broken! This error has been reported to Backtrace.", alert.getText());
+alert.accept();
+
+// New tab: window handles
+String original = driver.getWindowHandle();
+driver.findElement(By.cssSelector("[data-test='social-linkedin']")).click();
+wait.until(ExpectedConditions.numberOfWindowsToBe(2));
+for (String handle : driver.getWindowHandles()) {
+    if (!handle.equals(original)) {
+        driver.switchTo().window(handle);
+    }
+}
+wait.until(ExpectedConditions.urlContains("linkedin.com/company/sauce-labs"));
+driver.close();
+driver.switchTo().window(original);
+```
+
+### 4. Key differences
+- **Order.** Playwright: listen first, act second (the action does not return while an
+  alert is open). Selenium: act first, then `switchTo().alert()`.
+- **Unhandled alerts.** Playwright dismisses them automatically. Selenium throws
+  `UnhandledAlertException` on the next command.
+- **Tabs.** Each Playwright tab is its own `Page` object and all stay usable at once.
+  Selenium has a single focus that must be switched with window handles, and switched back.
+- In ADV-04 the external site is replaced by a stub page (`context.route(...)` +
+  `route.fulfill`), so the test does not depend on linkedin.com. Selenium has no simple
+  equivalent (see section 19).
+
+### 5. Which is better here and why
+Playwright for tabs (no handle bookkeeping). For alerts both work; Selenium's "act, then
+read the alert" reads more naturally, Playwright's handler-first order must be learned.
+
+### 6. No direct equivalent?
+Both support alerts and tabs. Uploads, downloads and iframes follow in Phase 4.
+
+---
+
+## 19. Network control: blocking requests and HAR replay
+
+**File:** `tests/advanced/network.spec.ts` (NET-01, ADV-05)
+
+### 1. What it does
+The test controls what the page receives from the network. NET-01 blocks every picture
+and checks the shop still works. ADV-05 records the login page's traffic to a HAR file and
+replays it in an offline browser. The same mechanism is used on real projects to fake a
+slow, failing or not-yet-built backend.
+
+### 2. Playwright (our code)
+```ts
+// block by resource type
+await page.route('**/*', async (route) => {
+  if (route.request().resourceType() === 'image') {
+    await route.abort();
+  } else {
+    await route.continue();
+  }
+});
+
+// record, then replay offline
+await recording.routeFromHAR(harPath, { update: true });      // record
+await replay.routeFromHAR(harPath, { notFound: 'abort' });    // replay
+```
+Other actions on a route: `route.fulfill({ status, body })` to answer with your own data,
+and `route.fetch()` to get the real answer and modify it.
+
+### 3. Selenium Java equivalent
+```java
+// Chromium only: block URLs through the DevTools Protocol
+ChromeDriver chrome = (ChromeDriver) driver;
+chrome.executeCdpCommand("Network.enable", Map.of());
+chrome.executeCdpCommand("Network.setBlockedURLs",
+        Map.of("urls", List.of("*.jpg", "*.jpeg", "*.png", "*.gif", "*.webp")));
+
+// Chromium only: answer a request yourself (Selenium 4 NetworkInterceptor)
+try (NetworkInterceptor interceptor = new NetworkInterceptor(driver,
+        Route.matching(req -> req.getUri().contains("/api/products"))
+             .to(() -> req -> new HttpResponse()
+                 .setStatus(200)
+                 .addHeader("Content-Type", "application/json")
+                 .setContent(Contents.utf8String("[]"))))) {
+    driver.get(baseUrl + "/inventory.html");
+}
+
+// HAR recording: BrowserMob Proxy; replay: a separate mock server such as WireMock
+```
+
+### 4. Key differences
+| | Playwright | Selenium |
+|---|---|---|
+| Browsers | Chromium, Firefox, WebKit | Chromium only (CDP / `NetworkInterceptor`); others need a proxy |
+| Block / modify / fake | `route.abort` / `route.fetch` + `fulfill` / `route.fulfill` | CDP commands or `NetworkInterceptor` |
+| Match on | URL glob, regex, or any code (method, resource type, body) | URL patterns; predicate in `NetworkInterceptor` |
+| HAR record + replay | `routeFromHAR`, both directions | Proxy to record, mock server to replay |
+| Observe traffic | `page.on('request' / 'response')`, `waitForResponse` | CDP events or a proxy |
+
+### 5. Which is better here and why
+Playwright, by a wide margin. This is one of the largest practical differences between
+the tools: testing "what does the UI do when the server answers 500 / is slow / returns
+an empty list" is a few lines here and a project of its own with Selenium.
+
+### 6. No direct equivalent?
+Selenium core has none. Workarounds: CDP (Chromium only), BrowserMob Proxy, WireMock, or
+asking developers for test hooks in the application.
+
+---
+
+## 20. Accessibility scans (axe)
+
+**File:** `tests/advanced/a11y.spec.ts` (A11Y-01)
+
+### 1. What it does
+The axe-core engine checks a page against WCAG rules (labels, contrast, ARIA use ...) and
+lists violations. We scan the login and Products pages for WCAG 2.0/2.1 level A and AA:
+0 violations on both.
+
+### 2. Playwright (our code)
+```ts
+import { AxeBuilder } from '@axe-core/playwright';
+
+const results = await new AxeBuilder({ page })
+  .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+  .analyze();
+await testInfo.attach('axe-results-login.json', {
+  body: JSON.stringify(results.violations, null, 2),
+  contentType: 'application/json',
+});
+expect(results.violations.map((v) => `${v.id} [${v.impact}]: ${v.help}`)).toEqual([]);
+```
+
+### 3. Selenium Java equivalent
+```java
+// dependency: com.deque.html.axe-core:selenium
+import com.deque.html.axecore.selenium.AxeBuilder;
+import com.deque.html.axecore.results.Results;
+
+Results results = new AxeBuilder()
+        .withTags(List.of("wcag2a", "wcag2aa", "wcag21a", "wcag21aa"))
+        .analyze(driver);
+List<String> violations = results.getViolations().stream()
+        .map(v -> v.getId() + " [" + v.getImpact() + "]: " + v.getHelp())
+        .toList();
+assertEquals(List.of(), violations);
+```
+
+### 4. Key differences
+Hardly any: axe-core is an independent engine with official bindings for both tools and
+nearly the same builder API (`withTags`, `include`, `exclude`, `disableRules`). Attaching
+the result to the report is built into Playwright; Selenium uses Allure attachments.
+
+### 5. Which is better here and why
+A tie.
+
+### 6. No direct equivalent?
+Not applicable. Limits that apply to both: an automated scan finds only part of all
+accessibility problems; keyboard operation, focus order and screen-reader sense need manual
+testing. Outside our WCAG scope, axe's best-practice rules report two moderate findings on
+SauceDemo (no level-one heading; login logo outside a landmark).
+
+---
+
+## 21. Time mocking (`page.clock`)
+
+**File:** `tests/advanced/clock.spec.ts` (ADV-06)
+
+### 1. What it does
+Replaces the page's JavaScript clock so a test can choose the date or let time pass
+instantly: "is the banner shown on 1 January?", "is the user warned after 15 idle minutes?"
+
+On SauceDemo we verified: the footer year follows the mocked clock ("© 2031"), but the
+login session does **not**, because it is a browser cookie whose lifetime the browser
+enforces with the real clock. Session expiry therefore cannot be tested with `page.clock`
+on this site.
+
+### 2. Playwright (our code)
+```ts
+await page.clock.install({ time: new Date('2031-03-15T10:00:00') });   // before the page loads
+await inventoryPage.open();
+await expect(inventoryPage.footer.copyright).toContainText('© 2031');
+
+await page.clock.fastForward('11:00');    // 11 minutes pass instantly, timers fire
+```
+
+### 3. Selenium Java equivalent
+```java
+// No clock API. Workaround (Chromium only): override Date before the application loads.
+((ChromeDriver) driver).executeCdpCommand("Page.addScriptToEvaluateOnNewDocument", Map.of(
+    "source",
+    "const fixed = new Date('2031-03-15T10:00:00').getTime();" +
+    "const RealDate = Date;" +
+    "Date = class extends RealDate {" +
+    "  constructor(...args) { super(...(args.length ? args : [fixed])); }" +
+    "  static now() { return fixed; }" +
+    "};"));
+driver.get(baseUrl + "/inventory.html");
+assertTrue(driver.findElement(By.cssSelector("[data-test='footer-copy']")).getText().contains("© 2031"));
+```
+
+### 4. Key differences
+- `page.clock` controls `Date`, `setTimeout`, `setInterval` and animation timing together,
+  in all browsers, and can move time forward (`fastForward`, `runFor`, `pauseAt`).
+- The Selenium workaround fixes `Date` only, on Chromium only; timers still run in real time.
+- Neither tool changes the browser's own clock, so cookie lifetimes and server time are
+  not affected.
+
+### 5. Which is better here and why
+Playwright; Selenium has no real answer for "let 15 minutes pass".
+
+### 6. No direct equivalent?
+Correct. Selenium workarounds: the `Date` override above, a shortened timeout in a test
+environment, a test hook provided by developers, or really waiting.
+
+---
+
+## 22. ARIA snapshots
+
+**File:** `tests/advanced/aria.spec.ts` (ADV-07)
+
+### 1. What it does
+Checks the structure of a block of the page as assistive technology perceives it (roles,
+names, nesting) in a single assertion. It ignores styling, so unlike a screenshot it works
+on every browser and operating system.
+
+### 2. Playwright (our code)
+```ts
+await expect(page.getByTestId('secondary-header')).toMatchAriaSnapshot(`
+  - combobox "Sort products":
+    - option "Name (A to Z)" [selected]
+    - option "Name (Z to A)"
+    - option "Price (low to high)"
+    - option "Price (high to low)"
+`);
+```
+The text was produced with `await locator.ariaSnapshot()` and then trimmed.
+
+### 3. Selenium Java equivalent
+```java
+// No snapshot. One assertion per fact:
+WebElement sort = driver.findElement(By.cssSelector("[data-test='product-sort-container']"));
+assertEquals("combobox", sort.getAriaRole());            // Selenium 4
+assertEquals("Sort products", sort.getAccessibleName()); // Selenium 4
+Select select = new Select(sort);
+assertEquals(List.of("Name (A to Z)", "Name (Z to A)", "Price (low to high)", "Price (high to low)"),
+        select.getOptions().stream().map(WebElement::getText).toList());
+assertEquals("Name (A to Z)", select.getFirstSelectedOption().getText());
+```
+
+### 4. Key differences
+Selenium 4 can read one element's role and accessible name; it cannot describe or compare
+a tree. The snapshot replaces many assertions, and a failure shows a readable diff.
+
+### 5. Which is better here and why
+Playwright. Useful for menus, forms and tables where "the right things are there in the
+right order" matters more than exact pixels.
+
+### 6. No direct equivalent?
+Correct; the workaround is individual assertions as shown.
+
+---
+
+## 23. Soft assertions
+
+**File:** `tests/advanced/soft-assertions.spec.ts` (ADV-08)
+
+### 1. What it does
+A normal assertion stops the test at the first failure. A soft assertion records the
+failure and continues, so one run reports every wrong field on a screen. The test still
+fails at the end.
+
+### 2. Playwright (our code)
+```ts
+await expect.soft(checkoutOverviewPage.paymentInfo).toHaveText(orderOverview.paymentInfo);
+await expect.soft(checkoutOverviewPage.shippingInfo).toHaveText(orderOverview.shippingInfo);
+await expect.soft(checkoutOverviewPage.subtotalLabel).toHaveText(`Item total: ${formatUsd(itemTotal)}`);
+await expect.soft(checkoutOverviewPage.taxLabel).toHaveText(`Tax: ${formatUsd(tax)}`);
+await expect.soft(checkoutOverviewPage.totalLabel).toHaveText(`Total: ${formatUsd(total)}`);
+
+// do not go on to place the order if anything above was wrong
+expect(test.info().errors).toHaveLength(0);
+```
+
+### 3. Selenium Java equivalent
+```java
+// JUnit 5
+assertAll("order summary",
+    () -> assertEquals("SauceCard #31337", text("[data-test='payment-info-value']")),
+    () -> assertEquals("Free Pony Express Delivery!", text("[data-test='shipping-info-value']")),
+    () -> assertEquals("Item total: $37.98", text("[data-test='subtotal-label']")),
+    () -> assertEquals("Tax: $3.04", text("[data-test='tax-label']")),
+    () -> assertEquals("Total: $41.02", text("[data-test='total-label']")));
+
+// TestNG
+SoftAssert soft = new SoftAssert();
+soft.assertEquals(text("[data-test='tax-label']"), "Tax: $3.04");
+soft.assertEquals(text("[data-test='total-label']"), "Total: $41.02");
+soft.assertAll();   // without this line the failures are silently lost
+```
+
+### 4. Key differences
+All three runners have it. Playwright's soft assertions keep auto-waiting and appear as
+individual failed steps in the report. TestNG's `SoftAssert` needs the final `assertAll()`;
+forgetting it is a well-known trap.
+
+### 5. Which is better here and why
+A tie on capability; Playwright is the hardest to misuse.
+
+### 6. No direct equivalent?
+Not applicable.
+
+### Related: test annotations used in this framework
+| Playwright | Meaning | JUnit 5 / TestNG |
+|---|---|---|
+| `{ tag: '@smoke' }` | Label for selecting tests | `@Tag` / `groups` |
+| `test.fail(...)` | Expected to fail (known defect), still runs | none / `expectedExceptions` |
+| `test.skip(condition, reason)` | Do not run (e.g. baseline exists only on Windows) | `@Disabled`, `Assumptions.assumeTrue` / `SkipException` |
+| `test.fixme(...)` | Do not run; the test itself needs fixing | `@Disabled("fix me")` |
+| `test.slow()` | Triple the time limit | `@Timeout` / `timeOut` |
+| `annotation: { type: 'defect', description }` | Free-form note shown in the report | Allure `@Issue`, `@Link` |
+| `test.describe.configure({ mode: 'serial' })` | Run a group in order, stop at first failure (avoid: tests should be independent) | `@TestMethodOrder` / `dependsOnMethods` |

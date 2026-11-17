@@ -18,6 +18,12 @@ export const validCustomer: Customer = {
   postalCode: '12345',
 };
 
+/** Fixed texts shown on the "Checkout: Overview" page (same for every order). */
+export const orderOverview = {
+  paymentInfo: 'SauceCard #31337',
+  shippingInfo: 'Free Pony Express Delivery!',
+};
+
 /** Texts shown on the "Checkout: Complete!" page after a successful order. */
 export const orderConfirmation = {
   header: 'Thank you for your order!',

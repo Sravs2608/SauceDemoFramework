@@ -19,9 +19,15 @@ export class CheckoutOverviewPage extends BasePage {
   readonly finishButton: Locator;
   readonly cancelButton: Locator;
   readonly itemPrices: Locator;
+  /** Shows "SauceCard #31337". */
+  readonly paymentInfo: Locator;
+  /** Shows "Free Pony Express Delivery!". */
+  readonly shippingInfo: Locator;
 
   constructor(page: Page) {
     super(page);
+    this.paymentInfo = page.getByTestId('payment-info-value');
+    this.shippingInfo = page.getByTestId('shipping-info-value');
     this.cancelButton = page.getByTestId('cancel');
     this.itemPrices = page.getByTestId('inventory-item-price');
     this.itemNames = page.getByTestId('inventory-item-name');
