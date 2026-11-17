@@ -181,6 +181,22 @@ We met strict mode for real while verifying the site: reading `inventory-item-na
 Products page failed because six elements matched. Selenium would have returned the first
 product without complaint, which is how tests end up checking the wrong element.
 
+**Added in Phase 2: narrowing a list with `filter()`.** To get the card of one product
+we take all cards and keep the one that contains that product's title link:
+
+```ts
+// src/pages/InventoryPage.ts
+card(product: Product): Locator {
+  return this.items.filter({ has: this.titleLink(product) });
+}
+```
+```java
+// Selenium: CSS cannot say "a card that contains X", so XPath is used
+By card = By.xpath("//*[@data-test='inventory-item'][.//*[@data-test='item-5-title-link']]");
+```
+`filter({ has })` and `filter({ hasText })` keep the result a lazy locator; Selenium needs
+an XPath with a nested condition, or a loop over `WebElement`s.
+
 ### 5. Which is better here and why
 Playwright. The locators are lazy (no stale elements when React redraws), strict (no
 silent "first match"), and `getByRole` covers the one element that has no `data-test`.

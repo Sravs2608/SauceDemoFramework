@@ -4,8 +4,10 @@ A production-style **Playwright + TypeScript** test automation framework for
 [saucedemo.com](https://www.saucedemo.com), built phase by phase as a learning project,
 with a Selenium Java comparison for every feature.
 
-**Status:** Phase 1 (core framework + smoke tests) complete. Plan and phases:
-[docs/SAUCEDEMO-PLAN.md](docs/SAUCEDEMO-PLAN.md).
+**Status:** Phase 1 (core framework + smoke tests) and Phase 2 (regression suite) complete:
+41 tests, of which 10 are known application defects marked `test.fail`. Plan and phases:
+[docs/SAUCEDEMO-PLAN.md](docs/SAUCEDEMO-PLAN.md). Results and defects:
+[docs/TRACEABILITY.md](docs/TRACEABILITY.md).
 
 ## What is in here
 
@@ -49,7 +51,7 @@ For GitHub Actions, add a repository secret named `SAUCE_PASSWORD`
 |---|---|
 | `npm test` | All tests, all browsers (headless) |
 | `npm run test:smoke` | Only `@smoke` tests |
-| `npm run test:regression` | Only `@regression` tests (none yet; they arrive in Phase 2) |
+| `npm run test:regression` | Only `@regression` tests |
 | `npm run test:chromium` | All tests, Chromium only (fastest) |
 | `npx playwright test tests/ui/cart` | One folder |
 | `npx playwright test -g "CHK-01"` | One test by its ID |
@@ -58,6 +60,18 @@ For GitHub Actions, add a repository secret named `SAUCE_PASSWORD`
 | `npx playwright test -g "CHK-01" --project=chromium --debug` | Step through with the Inspector |
 | `npm run report` | Open the last HTML report |
 | `npm run lint` / `npm run typecheck` | Static checks (run both before committing) |
+| `npx playwright test visual-user --project=chromium --update-snapshots` | Approve a new baseline screenshot after an intended design change |
+
+### Reading the results
+
+- `ok` = passed. `x` next to a test that is counted under "passed" = an **expected
+  failure**: a known application defect, marked `test.fail` (see the Defects table in
+  `docs/TRACEABILITY.md`).
+- `flaky` = failed, then passed on the automatic retry. Treat it as a problem to look at,
+  not as a pass.
+- "passed unexpectedly" = a `test.fail` test passed, so the defect seems fixed: remove the mark.
+- Locally 4 tests run in parallel and a failed test is retried once (2 workers, 2 retries in CI).
+- The two visual tests (USR-04) run only on Chromium on Windows and are skipped elsewhere.
 
 ## Study order
 
@@ -75,8 +89,19 @@ method and test has a `SELENIUM JAVA EQUIVALENT` note.
 9. `tests/ui/cart/cart.spec.ts` — the shortest test. Then `checkout.spec.ts`, then `auth.spec.ts`.
 10. `global-setup.ts` and `playwright.config.ts` — why tests start logged in, and the run settings.
 11. `.github/workflows/playwright.yml` — the same run in CI.
-12. `docs/SELENIUM-COMPARISON.md` — the ten topics side by side with Selenium Java.
-13. `docs/TRACEABILITY.md` — test case → automation → result.
+12. `docs/SELENIUM-COMPARISON.md` sections 1–10 — the Phase 1 topics side by side with Selenium Java.
+13. `docs/TRACEABILITY.md` — test case → automation → result → defects.
+
+Phase 2 (regression suite), in this order:
+
+14. `src/data/products.ts` (`sortOptions`, `expectedOrder`) and `src/data/messages.ts`.
+15. `tests/ui/auth/auth.spec.ts`, AUTH-02 to AUTH-05 — one test body, a table of data.
+16. `src/pages/InventoryPage.ts` (`card`, `sortBy`) → `tests/ui/inventory/inventory.spec.ts`.
+17. `src/fixtures/test.ts` (`seedCart`, `loginAs`) → the rest of `cart.spec.ts` and `checkout.spec.ts`.
+18. CHK-09 in `checkout.spec.ts` and `tests/ui/app/app-state.spec.ts` — known defects with `test.fail`.
+19. `tests/ui/users/special-users.spec.ts` — broken users and the slow user.
+20. `tests/ui/users/visual-user.spec.ts` — screenshot comparison.
+21. `docs/SELENIUM-COMPARISON.md` sections 11–16.
 
 Tip: run `npm run test:ui`, open CHK-01 and click through the steps while reading
 `tests/ui/checkout/checkout.spec.ts`.

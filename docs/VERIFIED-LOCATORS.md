@@ -86,6 +86,38 @@ The last slug contains `.` and `()`, so prefer `getByTestId()` (exact attribute 
 - Mobile viewport (Pixel 7 emulation, 412×839): login, add to cart, checkout, menu and logout use the same locators and behave the same.
 - Pages render a moment after the URL changes (React), so read text with retrying assertions, not straight after a URL check.
 
+## Verified during Phase 2 (2026-11-16, Playwright script against the live site)
+
+### Login
+- Both fields empty → `Epic sadface: Username is required`. After any login error the username input has class `input_error form_input error`. Clicking `error-button` removes the message.
+- With the cookie `session-username=locked_out_user` (left by the refused login), `/inventory.html` is still blocked. Not a defect.
+
+### Inventory
+- Sort dropdown `product-sort-container` is a real `<select>`; default value `az`.
+- Orders shown: `za` Red T-Shirt, Onesie, Fleece Jacket, Bolt T-Shirt, Bike Light, Backpack. `lohi` $7.99, $9.99, $15.99 (Bolt), $15.99 (Red), $29.99, $49.99. `hilo` $49.99, $29.99, $15.99 (Bolt), $15.99 (Red), $9.99, $7.99.
+- Each card has one `<img>` with `alt` = product name, `data-test="inventory-item-<slug>-img"`, and its own `/assets/....jpg` source.
+
+### Product detail (`/inventory-item.html?id=<id>`)
+- `inventory-item-name`, `inventory-item-desc`, `inventory-item-price`, image `item-<slug>-img`, button `add-to-cart` (becomes `remove`), `back-to-products` ("Back to products"). No `title` element. Reached from `item-<id>-title-link` or `item-<id>-img-link`.
+
+### Cart and checkout
+- `cart-contents` in localStorage lists ids in the order added (e.g. `[4,0,1]`); writing that key and reloading fills the cart (used by the `seedCart` fixture).
+- The cart survives reloads; removing on the cart page updates list and badge; `continue-shopping` → `/inventory.html`.
+- All three checkout fields empty → `Error: First Name is required`.
+- `cancel` on step one → `/cart.html`; `cancel` on the overview → `/inventory.html`; cart unchanged in both cases.
+- Totals: 2 items (Backpack + Bike Light) `Item total: $39.98`, `Tax: $3.20`, `Total: $43.18`. All 6 items `Item total: $129.94`, `Tax: $10.40`, `Total: $140.34`. Tax = 8% rounded to cents, confirmed.
+- Overview labels: `payment-info-label` "Payment Information:", `shipping-info-label` "Shipping Information:", `total-info-label` "Price Total".
+- **Empty cart:** Checkout is enabled and the whole flow completes: `Item total: $0`, `Tax: $0.00`, `Total: $0.00`, then "Thank you for your order!" (DEF-01).
+
+### Reset App State (`reset-sidebar-link`)
+- Removes the badge and `cart-contents`; the menu stays open; the sort order is not reset; product buttons keep showing "Remove" until the page is reloaded (DEF-02).
+
+### Special users
+- **problem_user:** all pictures `/assets/sl-404-....jpg`; sorting ignored; only Backpack, Bike Light and Onesie can be added, and nothing can be removed on the Products page; Backpack title link opens `?id=5` (Fleece Jacket); in checkout, typing the last name lands in First Name and Last Name stays empty → `Error: Last Name is required`.
+- **error_user:** sorting raises the alert `Sorting is broken! This error has been reported to Backtrace.`; the same three products cannot be added (page error "Failed to add item to the cart."); remove fails; Last Name stays empty but Continue works; Finish does nothing.
+- **visual_user:** Backpack picture is `sl-404`; prices are different random numbers on every load; menu icon has class `visual_failure`; two names have class `align_right`; the last button has class `btn_inventory_misaligned`. Functions (sort, add, remove, checkout) work.
+- **performance_glitch_user:** login measured at 5.2 s; the address changes at once and the content follows; everything else works normally.
+
 ## Not yet verified
-- Product detail page locators (INV-06), sorting results, special-user behaviors.
-- Whether the session really ends after 10 minutes of use (only the cookie lifetime was read), and tax with more than one item (CHK-02).
+- Whether the session really ends after 10 minutes of use (only the cookie lifetime was read).
+- `dynamic-catalog-sidebar-link`, `generate-pdf-order` (new on the site, not in the plan), footer social links.
