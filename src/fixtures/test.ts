@@ -148,7 +148,10 @@ export const test = base.extend<Fixtures>({
     await use(async (user: User) => {
       await loginPage.open();
       await loginPage.login(user);
+      // For the slow user the address changes at once but the page content arrives about
+      // 5 seconds later, so the generous limit must be on the CONTENT, not only the URL.
       await expect(page).toHaveURL('/inventory.html', { timeout: LOGIN_TIMEOUT_MS });
+      await expect(inventoryPage.title).toBeVisible({ timeout: LOGIN_TIMEOUT_MS });
       await inventoryPage.expectLoaded();
     });
   },

@@ -1182,3 +1182,147 @@ around the body, or a custom extension. TestNG's `expectedExceptions` is close.
 The problem_user, error_user and visual_user behaviours are built into SauceDemo on purpose
 for practice. DEF-01 and DEF-02 are our own findings; their "expected" behaviour is our
 assumption, because SauceDemo publishes no requirements.
+
+---
+
+## 15. Slow pages: longer timeouts instead of hard waits
+
+**Files:** `src/fixtures/test.ts` (`loginAs`), `tests/ui/users/special-users.spec.ts` (USR-02)
+
+### 1. What it does
+`performance_glitch_user` logs in normally, but the Products page takes about five
+seconds to appear (measured 5.2 s). That is just over Playwright's default 5-second
+assertion limit. The test has to cope with the slowness without a fixed sleep.
+
+A real lesson from building this: the first version gave the longer limit to the **URL**
+check. It was flaky, because for this user the address changes immediately and the
+**content** arrives five seconds later. The fix was to put the long limit on the content.
+Wait for what the user is actually waiting for.
+
+### 2. Playwright (our code)
+```ts
+const LOGIN_TIMEOUT_MS = 15_000;
+
+await loginPage.login(user);
+await expect(page).toHaveURL('/inventory.html', { timeout: LOGIN_TIMEOUT_MS });
+await expect(inventoryPage.title).toBeVisible({ timeout: LOGIN_TIMEOUT_MS });
+await inventoryPage.expectLoaded();
+
+// in the test: this account is slow by design, give the whole test three times the limit
+test.slow();
+```
+
+### 3. Selenium Java equivalent
+```java
+loginPage.login(Users.PERFORMANCE_GLITCH);
+
+// a dedicated, longer wait for this step only; the default wait stays short
+WebDriverWait slowWait = new WebDriverWait(driver, Duration.ofSeconds(15));
+slowWait.until(ExpectedConditions.urlToBe(baseUrl + "/inventory.html"));
+slowWait.until(ExpectedConditions.textToBe(By.cssSelector("[data-test='title']"), "Products"));
+
+// what NOT to do in either tool
+// Thread.sleep(6000);              // Selenium
+// await page.waitForTimeout(6000); // Playwright
+```
+JUnit 5 test time limit: `@Timeout(90)` on the test method; TestNG: `@Test(timeOut = 90000)`.
+
+### 4. Key differences
+| | Playwright | Selenium Java |
+|---|---|---|
+| Longer limit for one check | `{ timeout: 15_000 }` on the assertion | A second `WebDriverWait` with a longer duration |
+| Longer limit for one test | `test.slow()` or `test.setTimeout()` | `@Timeout` (JUnit 5) / `timeOut` (TestNG) |
+| Global defaults | `timeout`, `expect.timeout` in the config | Implicit wait / your own default `WebDriverWait` |
+| Hard wait | `page.waitForTimeout` (flagged by our ESLint rule) | `Thread.sleep` |
+
+Both waits return as soon as the condition is true; nothing is wasted on a fast day.
+
+### 5. Which is better here and why
+A tie in principle: both tools have condition-based waits and both let you raise a limit
+locally. Playwright is more convenient (one option on the line that needs it), and the
+ESLint rule stops hard waits from creeping in.
+
+### 6. No direct equivalent?
+Not applicable.
+
+### Related: unexpected browser alerts
+For `error_user`, sorting pops up a browser alert ("Sorting is broken! ..."). Playwright
+dismisses dialogs automatically unless the test registers `page.on('dialog', ...)`, so the
+test carries on and fails on the real problem. In Selenium an open alert blocks the
+browser: the next command throws `UnhandledAlertException` until the test calls
+`driver.switchTo().alert().dismiss()` (or sets the `unhandledPromptBehavior` capability).
+
+---
+
+## 16. Visual comparison: `toHaveScreenshot` vs AShot
+
+**Files:** `tests/ui/users/visual-user.spec.ts`, baseline image in
+`tests/ui/users/visual-user.spec.ts-snapshots/`
+
+### 1. What it does
+`visual_user` sees the same texts and elements as everyone else, so ordinary assertions
+pass, but the page *looks* wrong (wrong picture, misaligned button). A visual test stores
+an approved screenshot ("baseline") in Git and compares every new screenshot with it,
+pixel by pixel.
+
+We have two tests: standard_user must match the baseline (proves the comparison and the
+baseline are sound), and visual_user is compared with the same baseline and is expected to
+differ (marked `test.fail`, DEF-V1).
+
+### 2. Playwright (our code)
+```ts
+await expect(page).toHaveScreenshot('products-page.png', {
+  fullPage: true,
+  maxDiffPixelRatio: 0.01,                      // tolerate up to 1% noise
+  mask: [page.getByTestId('footer-copy')],      // hide the "© 2026" text
+});
+```
+```bash
+# approve a new baseline after an intended design change
+npx playwright test visual-user --project=chromium --update-snapshots
+```
+
+### 3. Selenium Java equivalent
+Selenium can take screenshots but cannot compare them. The usual open-source answer is the
+AShot library (`ru.yandex.qatools.ashot:ashot`):
+
+```java
+BufferedImage actual = new AShot()
+        .shootingStrategy(ShootingStrategies.viewportPasting(100))   // scroll + stitch = full page
+        .addIgnoredElement(By.cssSelector("[data-test='footer-copy']"))
+        .takeScreenshot(driver)
+        .getImage();
+
+BufferedImage expected = ImageIO.read(new File("src/test/resources/baselines/products-page.png"));
+
+ImageDiff diff = new ImageDiffer().makeDiff(expected, actual);
+if (diff.hasDiff()) {
+    ImageIO.write(diff.getMarkedImage(), "png", new File("target/visual/products-page-diff.png"));
+}
+assertFalse(diff.hasDiff(), "Products page differs from the approved baseline");
+```
+
+### 4. Key differences
+| | Playwright | Selenium + AShot |
+|---|---|---|
+| Availability | Built in | Extra library (or a paid service: Applitools, Percy) |
+| Stable capture | Waits until two screenshots in a row are identical; freezes CSS animations | Your job (waits before the screenshot) |
+| Full page | `fullPage: true` | Scroll-and-stitch strategy |
+| Baseline handling | File per browser + OS, created and updated by a command-line flag | You name, store and replace the files |
+| On failure | Expected, actual and diff images in the HTML report with a slider | You save and attach the diff image |
+| Masks / tolerance | `mask`, `maxDiffPixels`, `maxDiffPixelRatio`, `threshold` | `addIgnoredElement`, `ImageDiffer` settings |
+
+### 5. Which is better here and why
+Playwright, clearly, for anything done in-house: zero setup and a good failure report.
+
+### 6. No direct equivalent?
+Correct, Selenium has none; AShot or a visual-testing service is the workaround.
+
+### Limits to know (both tools)
+- A baseline is valid only for the browser and operating system it was made on (fonts and
+  anti-aliasing differ). Ours is Chromium on Windows, so these two tests are **skipped on
+  Firefox, WebKit, mobile and on the Linux machines of GitHub Actions**. Making Linux
+  baselines for CI is listed as an open item.
+- Dynamic content (dates, random prices, adverts) must be masked or the test is flaky.
+- Pixel comparison finds differences; it cannot judge whether a design *looks good*. That
+  stays a manual check.
