@@ -118,6 +118,40 @@ The last slug contains `.` and `()`, so prefer `getByTestId()` (exact attribute 
 - **visual_user:** Backpack picture is `sl-404`; prices are different random numbers on every load; menu icon has class `visual_failure`; two names have class `align_right`; the last button has class `btn_inventory_misaligned`. Functions (sort, add, remove, checkout) work.
 - **performance_glitch_user:** login measured at 5.2 s; the address changes at once and the content follows; everything else works normally.
 
+## Verified during Phase 3 (2026-11-16, Playwright script against the live site)
+
+### Roles and accessible names (Products page)
+- Sort dropdown: role `combobox`, name "Sort products" (`aria-label`).
+- Cart icon (`shopping-cart-link`, an `<a>`): role `button`, name "Cart, empty", and "Cart, 1 items" with one product.
+- Six buttons named "Add to cart"; product name and picture are buttons named "View details for <product>"; pictures are `img` named by the product.
+- 3 links on the page (the footer social links). `getByText('Sauce Labs')` matches 8 elements; `getByText('Sauce Labs Backpack', { exact: true })` matches 1.
+- Cards: 2 contain "$15.99"; 4 do not contain "T-Shirt".
+- Structure containers: `primary-header`, `secondary-header`, `header-container`, `inventory-container`.
+
+### Login page
+- `getByRole('textbox', { name: 'Username' })`, `getByPlaceholder('Username')`, `getByLabel('Username')` and `getByRole('button', { name: 'Login' })` each match 1 element. The form has the accessible name "Login".
+
+### Footer
+- `social-x` → `https://x.com/saucelabs`; `social-facebook` → `https://www.facebook.com/saucelabs`; `social-linkedin` → `https://www.linkedin.com/company/sauce-labs/`. All `target="_blank"`, `rel="noreferrer"`; each opens a new tab whose opener is the original page.
+- linkedin.com answers automated browsers with a challenge page, so ADV-04 stubs it.
+- `footer-copy`: "© <year> Sauce Labs. All Rights Reserved. Terms of Service | Privacy Policy"; the year comes from the JavaScript clock.
+- Menu `about-sidebar-link` → `https://saucelabs.com/` (same tab, no target).
+
+### Network
+- Products page requests: 1 document, 2 stylesheets, 1 script, 2 fetch, 3 fonts, 6 images (`/assets/*.jpg`). Hosts: `www.saucedemo.com`, `fonts.googleapis.com`, `fonts.gstatic.com`, `events.backtrace.io`.
+- With all images aborted the page lists 6 products and add-to-cart works.
+
+### Accessibility (axe-core)
+- WCAG 2.0/2.1 A and AA tags: 0 violations on login and Products pages.
+- All rules: `page-has-heading-one` (both pages) and `region` (login logo), both moderate, best-practice only.
+
+### Clock and session
+- With `page.clock` set to 2031 the footer reads "© 2031".
+- No JavaScript session timer: after 11 mocked minutes navigation and reload still work.
+
+### Alert
+- error_user, sorting: dialog type `alert`, message `Sorting is broken! This error has been reported to Backtrace.` The action that triggers it does not finish until the dialog is handled.
+
 ## Not yet verified
-- Whether the session really ends after 10 minutes of use (only the cookie lifetime was read).
-- `dynamic-catalog-sidebar-link`, `generate-pdf-order` (new on the site, not in the plan), footer social links.
+- Whether the session really ends after 10 real minutes (only the cookie lifetime was read).
+- `dynamic-catalog-sidebar-link`, `generate-pdf-order` (new on the site, not in the plan).

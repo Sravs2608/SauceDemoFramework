@@ -4,8 +4,9 @@ A production-style **Playwright + TypeScript** test automation framework for
 [saucedemo.com](https://www.saucedemo.com), built phase by phase as a learning project,
 with a Selenium Java comparison for every feature.
 
-**Status:** Phase 1 (core framework + smoke tests) and Phase 2 (regression suite) complete:
-41 tests, of which 10 are known application defects marked `test.fail`. Plan and phases:
+**Status:** Phase 1 (core framework + smoke tests), Phase 2 (regression suite) and Phase 3
+(advanced topics) complete: 52 tests, of which 10 are known application defects marked
+`test.fail`. Plan and phases:
 [docs/SAUCEDEMO-PLAN.md](docs/SAUCEDEMO-PLAN.md). Results and defects:
 [docs/TRACEABILITY.md](docs/TRACEABILITY.md).
 
@@ -20,6 +21,7 @@ with a Selenium Java comparison for every feature.
 | `src/pages/` | Page objects (one class per screen) and shared components |
 | `src/fixtures/test.ts` | Our `test` with page objects ready to use |
 | `tests/ui/` | The tests, grouped by feature |
+| `tests/advanced/` | One spec per advanced topic: locators, contexts, events, network, accessibility, clock, ARIA, soft assertions |
 | `.github/workflows/playwright.yml` | CI pipeline (GitHub Actions) |
 | `docs/` | Plan, verified locators, traceability matrix, Selenium comparison |
 
@@ -54,6 +56,8 @@ For GitHub Actions, add a repository secret named `SAUCE_PASSWORD`
 | `npm run test:regression` | Only `@regression` tests |
 | `npm run test:chromium` | All tests, Chromium only (fastest) |
 | `npx playwright test tests/ui/cart` | One folder |
+| `npx playwright test tests/advanced --project=chromium` | The advanced-topic tests |
+| `npx playwright test --shard=1/4` | One quarter of the suite (how CI splits the full run) |
 | `npx playwright test -g "CHK-01"` | One test by its ID |
 | `npx playwright test --project=chromium --headed` | Watch the browser |
 | `npm run test:ui` | UI Mode: pick tests, watch them, time-travel through steps |
@@ -102,6 +106,20 @@ Phase 2 (regression suite), in this order:
 19. `tests/ui/users/special-users.spec.ts` — broken users and the slow user.
 20. `tests/ui/users/visual-user.spec.ts` — screenshot comparison.
 21. `docs/SELENIUM-COMPARISON.md` sections 11–16.
+
+Phase 3 (advanced topics, `tests/advanced/`). Each spec is independent; this order goes
+from familiar to new:
+
+22. `locators.spec.ts` — every way to find an element.
+23. `soft-assertions.spec.ts` — check many fields, report all failures.
+24. `events.spec.ts` — alerts and new tabs ("listen first, then act").
+25. `contexts.spec.ts` — two users in one test.
+26. `network.spec.ts` — block requests; record and replay traffic (HAR).
+27. `aria.spec.ts` — check the structure of a block in one assertion.
+28. `clock.spec.ts` — change the date the page sees.
+29. `a11y.spec.ts` — accessibility scan with axe.
+30. `.github/workflows/playwright.yml`, jobs `regression` and `merge-reports` — sharding.
+31. `docs/SELENIUM-COMPARISON.md` sections 17–24.
 
 Tip: run `npm run test:ui`, open CHK-01 and click through the steps while reading
 `tests/ui/checkout/checkout.spec.ts`.

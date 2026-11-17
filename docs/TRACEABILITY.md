@@ -11,7 +11,7 @@ Test case IDs are never changed. Locators are `data-test` values unless stated o
   passed by the runner and will be reported as "passed unexpectedly" if the defect is fixed.
 - *Not run* = no test yet.
 
-## Summary (after Phase 2)
+## Summary (after Phase 3)
 
 | Area | Test cases in plan | Automated | Tests in code |
 |---|---|---|---|
@@ -22,10 +22,11 @@ Test case IDs are never changed. Locators are `data-test` values unless stated o
 | Special users | 4 | 4 | 10 |
 | App state | 1 | 1 | 2 |
 | Mobile (MOB-01) | 1 | 1 | (project, no own spec) |
-| NET-01, A11Y-01 | 2 | 0 | Planned, Phase 3 |
+| NET-01, A11Y-01 | 2 | 2 | 3 |
+| Advanced topics (plan section 6) | no IDs in plan | ADV-01..08 | 8 |
 | API-01..04 | 4 | 0 | Planned, Phase 4 |
 
-41 tests in code: 31 normal + 10 marked `test.fail` (known defects).
+52 tests in code: 42 normal + 10 marked `test.fail` (known defects).
 
 ## Execution history
 
@@ -42,9 +43,15 @@ Test case IDs are never changed. Locators are `data-test` values unless stated o
 | E9 | 2026-11-16 | Phase 2, per group on chromium (4 workers, 1 retry): auth 8, inventory + cart 12, checkout 9, users 10, app 2 | All passed. One flaky result in the first users run (USR-02), root cause found and fixed, see N4 |
 | E10 | 2026-11-16 | **`npx playwright test --project=chromium`** (full suite, 4 workers, 1 retry) | **41 passed (41.1 s)**: 31 passed + 10 expected failures; 0 flaky, 0 retries |
 
-Not executed yet: the Phase 2 tests on firefox, webkit and mobile-chrome; the full suite on
-all projects with the current settings; any run in GitHub Actions (needs the
-`SAUCE_PASSWORD` repository secret).
+| E11 | 2026-11-16 | Phase 3: `npx playwright test tests/advanced --project=chromium` | 11 passed (9.0 s) on the first run |
+| E12 | 2026-11-16 | Shard check: `npx playwright test --project=chromium --shard=1/2 --reporter=blob,list`, then `npx playwright merge-reports --reporter html ./blob-report` | 26 passed (shard 1 of 2); HTML report built from the blob |
+| E13 | 2026-11-16 | **`npx playwright test --project=chromium`** (full suite after Phase 3) | **52 passed (33.9 s)**: 42 passed + 10 expected failures; 0 flaky |
+
+"Passed" and "Expected failure" in the tables below were the same in E10 and E13.
+
+Not executed yet: the Phase 2 and Phase 3 tests on firefox, webkit and mobile-chrome; the
+full suite on all projects with the current settings; any run in GitHub Actions, including
+the sharded regression job (needs the `SAUCE_PASSWORD` repository secret).
 
 ## Authentication — `tests/ui/auth/auth.spec.ts`
 
@@ -117,9 +124,32 @@ all projects with the current settings; any run in GitHub Actions (needs the
 | APP-01 | Reset App State clears cart | regression | `tests/ui/app/app-state.spec.ts` | Badge gone; `cart-contents` removed; cart page empty | Automated | Passed | None |
 | APP-01 | Reset App State restores the "Add to cart" buttons | regression | `tests/ui/app/app-state.spec.ts` | Button says "Add to cart" again. **Actual:** still "Remove" until reload | Automated (`test.fail`) | Expected failure | **DEF-02** |
 | MOB-01 | Smoke suite on mobile viewport | smoke | `mobile-chrome` project in `playwright.config.ts` (Pixel 7, `grep: /@smoke/`) | The five smoke tests pass on a 412×839 viewport | Automated | Not run in E10 (chromium only); intermittent in Phase 1 full runs (N1) | None |
-| NET-01 | Block images via network mocking; page still functional | regression | — | — | Planned (Phase 3) | Not run | — |
-| A11Y-01 | Accessibility scan on login and inventory pages | regression | — | — | Planned (Phase 3) | Not run | — |
+| NET-01 | Block images via network mocking; page still functional | regression | `tests/advanced/network.spec.ts` | All 6 product names listed; every picture has naturalWidth 0; at least 6 image requests blocked; add to cart and cart page work | Automated | Passed | None |
+| A11Y-01 | Login page has no WCAG A/AA violations | regression | `tests/advanced/a11y.spec.ts` | axe scan with tags wcag2a, wcag2aa, wcag21a, wcag21aa returns no violations | Automated | Passed | None (see N5) |
+| A11Y-01 | Inventory page has no WCAG A/AA violations | regression | `tests/advanced/a11y.spec.ts` | Same scan on `/inventory.html` returns no violations | Automated | Passed | None (see N5) |
 | API-01..04 | Create, read, update, delete on practice API | regression | — | — | Planned (Phase 4) | Not run | — |
+
+## Advanced topics (plan section 6) — `tests/advanced/`
+
+The plan lists these as topics without test IDs. IDs ADV-01 to ADV-08 were assigned in
+Phase 3; the plan document itself was not changed.
+
+| ID | Topic | Test | Spec | Expected result | Automation | Execution (E13) | Defects |
+|---|---|---|---|---|---|---|---|
+| ADV-01 | Advanced locators | Role, text, filter, position and chaining | `locators.spec.ts` | combobox "Sort products" has value `az`; 6 "Add to cart" buttons; "Cart, empty" button is `shopping-cart-link`; 2 cards at $15.99; 4 cards without "T-Shirt"; first/nth/last names; adding via a filtered card gives "Cart, 1 items" | Automated | Passed | None |
+| ADV-02 | Browser contexts & isolation | Two users in two contexts keep separate sessions and carts | `contexts.spec.ts` | standard_user badge 2, visual_user badge 1; cookies hold each user's name; after A logs out, B is still logged in with badge 1 | Automated | Passed | None |
+| ADV-03 | Page events: alert | Browser alert is caught, read and accepted | `events.spec.ts` | Dialog type `alert`, message "Sorting is broken! This error has been reported to Backtrace." (error_user, DEF-E1) | Automated | Passed | Uses DEF-E1 as the trigger |
+| ADV-04 | Page events: new tab | Footer link opens a new tab | `events.spec.ts` | X, Facebook, LinkedIn hrefs correct; LinkedIn has `target="_blank"`; a second tab opens at `https://www.linkedin.com/company/sauce-labs/` (answered by a stub page); original tab stays on `/inventory.html` | Automated | Passed | None |
+| ADV-05 | HAR record/replay | Record a HAR, then replay the page with the network offline | `network.spec.ts` | Login page renders in an offline context served only from the recorded HAR | Automated | Passed | None |
+| ADV-06 | Time mocking | page.clock controls the date the page sees | `clock.spec.ts` | Footer shows "© 2031" with the clock set to 2031; after 11 mocked minutes the cart page still opens (no session timer in the page) | Automated | Passed | None (see N6) |
+| ADV-07 | ARIA snapshots | ARIA snapshot of the sort control and a product card | `aria.spec.ts` | Sort combobox with four options (A to Z selected); Backpack card with picture, name button and "Add to cart"; header with "Open Menu", "Swag Labs", "Cart, empty" | Automated | Passed | None |
+| ADV-08 | Soft assertions | Soft assertions report every wrong field of the order summary | `soft-assertions.spec.ts` | Backpack + Onesie: names, prices, "SauceCard #31337", "Free Pony Express Delivery!", "Item total: $37.98", "Tax: $3.04", "Total: $41.02"; then the order completes | Automated | Passed | None |
+
+Section 6 topics covered elsewhere: auto-waiting and web-first assertions (throughout;
+USR-02), `test.step` and annotations (throughout), ESLint and CI secrets (Phase 1), visual
+comparison (USR-04), sharding (CI workflow, section 24 of the comparison doc).
+Still to come: frames, uploads and downloads on the-internet, backend validation and
+API-based setup (Phase 4); debugging/UI Mode/codegen and flaky-test guides (Phase 5).
 
 ## Defects
 
@@ -181,3 +211,20 @@ the `loginAs` fixture. Root cause: for performance_glitch_user the address chang
 limit was on the URL check only, leaving the content check with the default 5 seconds.
 Fix: the 15-second limit is now also on the "Products" heading, and the test is marked
 `test.slow()`. Verified with `--repeat-each=5`: 5 passed, no retries.
+
+**N5 — Observation: accessibility best-practice findings (not WCAG failures).** With all
+axe rules switched on (not just WCAG A/AA), two moderate "best-practice" findings appear:
+`page-has-heading-one` (login and Products pages have no level-one heading) and `region`
+(the login logo is outside any landmark). They are outside the A11Y-01 scope and are not
+asserted.
+
+**N6 — Closed: plan open item "does the session expire on a timer?".** Checked on the live
+site: there is no JavaScript session timer. The session is the `session-username` cookie
+with a 10-minute lifetime enforced by the browser's real clock, which `page.clock` does not
+change (11 mocked minutes leave the user logged in). Session expiry therefore cannot be
+tested with `page.clock` here; an expired session behaves like a missing cookie (AUTH-07).
+Whether a real 10-minute wait logs the user out was not timed.
+
+**N7 — Observation: third-party requests.** The pages also call `fonts.googleapis.com`,
+`fonts.gstatic.com` and `events.backtrace.io` (error reporting). The tests do not block
+them. Not examined further.
