@@ -394,8 +394,8 @@ export default defineConfig({
   globalSetup: './global-setup.ts',
   fullyParallel: true,
   forbidOnly: isCI,
-  retries: isCI ? 2 : 0,
-  workers: isCI ? 2 : undefined,
+  retries: isCI ? 2 : 1,
+  workers: isCI ? 2 : 4,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: env.baseUrl,
@@ -808,3 +808,87 @@ fast) matters more than the syntax.
 
 ### 6. No direct equivalent?
 Not applicable; both support it.
+
+---
+
+## 10. Running in GitHub Actions
+
+**File:** `.github/workflows/playwright.yml`
+
+### 1. What it does
+Every push and pull request starts a clean Linux machine in GitHub that installs the
+project, runs lint and the smoke tests on all browsers, and keeps the HTML report. The
+full suite can be started by hand. The password comes from an encrypted repository secret.
+
+### 2. Playwright (our code)
+```yaml
+env:
+  BASE_URL: https://www.saucedemo.com
+  STANDARD_USER: standard_user
+  LOCKED_OUT_USER: locked_out_user
+  SAUCE_PASSWORD: ${{ secrets.SAUCE_PASSWORD }}
+steps:
+  - uses: actions/checkout@v7
+  - uses: actions/setup-node@v7
+    with:
+      node-version: 24
+      cache: npm
+  - run: npm ci
+  - run: npx playwright install --with-deps chromium firefox webkit
+  - run: npx playwright test --grep @smoke
+  - uses: actions/upload-artifact@v7
+    if: ${{ !cancelled() }}
+    with:
+      name: playwright-report
+      path: playwright-report/
+```
+
+### 3. Selenium Java equivalent
+```yaml
+env:
+  BASE_URL: https://www.saucedemo.com
+  STANDARD_USER: standard_user
+  LOCKED_OUT_USER: locked_out_user
+  SAUCE_PASSWORD: ${{ secrets.SAUCE_PASSWORD }}
+steps:
+  - uses: actions/checkout@v7
+  - uses: actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: 21
+      cache: maven
+  # Chrome and Firefox are preinstalled on ubuntu-latest; Selenium Manager (4.6+)
+  # downloads the matching chromedriver / geckodriver on first use.
+  - run: mvn -B test -Dgroups=smoke -Dbrowser=chrome
+  - run: mvn -B test -Dgroups=smoke -Dbrowser=firefox
+  - uses: actions/upload-artifact@v7
+    if: ${{ !cancelled() }}
+    with:
+      name: test-report
+      path: |
+        target/surefire-reports/
+        target/allure-results/
+```
+(`actions/setup-java@v4` is the version I know; check for a newer one before using it.
+The other action versions were checked against GitHub on 2026-11-16.)
+
+### 4. Key differences
+| | Playwright | Selenium Java |
+|---|---|---|
+| Browsers in CI | `playwright install --with-deps` installs pinned browser builds, the same ones as on your laptop | Uses whatever Chrome/Firefox the runner image has; versions drift over time |
+| Safari engine | WebKit runs on the Linux runner | Needs a macOS runner (slower, costs more minutes) or a cloud grid |
+| All browsers | One command runs every project | One Maven run per browser, or a matrix, or Selenium Grid |
+| Headless | Default | You add `--headless=new` in `ChromeOptions` |
+| Failure evidence | Report with trace, screenshot, video | Surefire XML + whatever your listeners saved |
+| Secrets | `${{ secrets.X }}` → environment variable | Same |
+
+### 5. Which is better here and why
+Playwright. The pinned browsers remove the classic "passes locally, fails in CI because
+Chrome updated" problem, WebKit runs on Linux, and the uploaded trace usually explains a
+CI-only failure without re-running anything. The pipeline structure itself is the same for
+both tools.
+
+### 6. No direct equivalent?
+Selenium has no trace artifact and no Safari-engine run on Linux. Workarounds: screenshots
+and browser logs saved by a listener, a video recorder such as Selenoid/Selenium Grid
+video, and macOS runners or a cloud provider (Sauce Labs, BrowserStack) for Safari.

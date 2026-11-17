@@ -1,0 +1,67 @@
+# Role: the CI pipeline. GitHub runs this file on its own Linux machine:
+#   - on every push and pull request to main  -> smoke tests only (fast feedback)
+#   - when started by hand ("Run workflow")   -> the full suite (all tags)
+# It installs the project and the browsers, runs lint and type-check, runs the tests on
+# every project in playwright.config.ts, and uploads the HTML report (with traces,
+# screenshots and videos of failures) as a downloadable artifact.
+#
+# Required one-time setup in GitHub: Settings -> Secrets and variables -> Actions ->
+# New repository secret, name SAUCE_PASSWORD. Without it the run stops in global setup
+# with: Missing required setting "SAUCE_PASSWORD".
+name: Playwright Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ github.event_name == 'workflow_dispatch' && 'Full suite' || 'Smoke' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # CI=true is set by GitHub automatically; the config uses it for retries and workers.
+      BASE_URL: https://www.saucedemo.com
+      STANDARD_USER: standard_user
+      LOCKED_OUT_USER: locked_out_user
+      SAUCE_PASSWORD: ${{ secrets.SAUCE_PASSWORD }}
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies (exact versions from package-lock.json)
+        run: npm ci
+
+      - name: Lint and type-check
+        run: |
+          npm run lint
+          npm run typecheck
+
+      - name: Install browsers and their system libraries
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      - name: Run smoke tests
+        if: github.event_name != 'workflow_dispatch'
+        run: npx playwright test --grep @smoke
+
+      - name: Run full suite
+        if: github.event_name == 'workflow_dispatch'
+        run: npx playwright test
+
+      - name: Upload HTML report
+        # Runs even when a test step failed: that is when the report matters most.
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
