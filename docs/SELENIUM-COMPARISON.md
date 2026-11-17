@@ -1092,3 +1092,93 @@ test data lives in files; in Playwright you would read the file yourself and loo
 
 ### 6. No direct equivalent?
 Not applicable; all runners support it.
+
+---
+
+## 14. Known defects: `test.fail` vs `@Disabled` / `expectedExceptions`
+
+**Files:** `tests/ui/checkout/checkout.spec.ts` (CHK-09), `tests/ui/app/app-state.spec.ts`,
+`tests/ui/users/special-users.spec.ts`, `tests/ui/users/visual-user.spec.ts`
+
+### 1. What it does
+When the application has a known defect, the test for it would fail on every run and
+turn the pipeline red, hiding new problems. There are three bad answers (delete the test,
+skip it, or loosen the assertion until it passes) and one good one: keep the test strict,
+and tell the runner "this one is expected to fail for now". The run stays green; the
+report shows the test as an expected failure with its defect id; and when the defect is
+fixed the test is reported as **passed unexpectedly**, which tells us to remove the mark.
+
+### 2. Playwright (our code)
+```ts
+test.fail('CHK-09: checkout with empty cart is not possible', {
+  tag: '@regression',
+  annotation: { type: 'defect', description: 'DEF-01: checkout can be started and completed with an empty cart' },
+}, async ({ page, cartPage }) => {
+  await cartPage.open();
+  await expect(cartPage.items).toHaveCount(0);
+  await cartPage.checkout();
+  // Fails today: the application opens /checkout-step-one.html (DEF-01).
+  await expect(page).toHaveURL('/cart.html');
+});
+```
+In the terminal an expected failure is printed with `x` and counted under "passed".
+
+### 3. Selenium Java equivalent
+```java
+// JUnit 5: no "expected to fail". The usual choice is to skip the test:
+@Test
+@Tag("regression")
+@Disabled("DEF-01: checkout can be started and completed with an empty cart")
+void chk09_checkoutWithEmptyCartIsNotPossible() {
+    driver.get(baseUrl + "/cart.html");
+    driver.findElement(By.cssSelector("[data-test='checkout']")).click();
+    assertEquals(baseUrl + "/cart.html", driver.getCurrentUrl());
+}
+
+// TestNG: the closest real equivalent, the test must throw to be counted as passed
+@Test(groups = "regression",
+      expectedExceptions = AssertionError.class,
+      description = "DEF-01: checkout can be started and completed with an empty cart")
+public void chk09_checkoutWithEmptyCartIsNotPossible() {
+    driver.get(baseUrl + "/cart.html");
+    driver.findElement(By.cssSelector("[data-test='checkout']")).click();
+    Assert.assertEquals(driver.getCurrentUrl(), baseUrl + "/cart.html");
+}
+```
+
+### 4. Key differences
+| | Playwright `test.fail` | JUnit 5 `@Disabled` | TestNG `expectedExceptions` |
+|---|---|---|---|
+| Test still runs | Yes | No (skipped) | Yes |
+| Notices when the defect is fixed | Yes, "passed unexpectedly" fails the run | No | Yes, test fails |
+| Shown in the report | As expected failure + annotation | As skipped | As passed |
+| Defect reference | `annotation` (appears in the HTML report) | Text in `@Disabled` | `description` |
+
+Related marks in Playwright: `test.skip` (do not run), `test.fixme` (do not run, known
+broken test), `test.slow` (triple the timeout).
+
+### 5. Which is better here and why
+Playwright. `test.fail` is the honest option: the defect stays documented, measured on
+every run, and cannot be forgotten once fixed. With JUnit, skipped tests tend to stay
+skipped for years.
+
+One caution that applies to every "expected to fail" mechanism: the test counts as
+"failing as expected" whatever the reason, including a timeout caused by a slow network.
+Each of our `test.fail` tests therefore has a comment on the exact line that fails today.
+
+### 6. No direct equivalent?
+JUnit 5 has none; the workarounds are `@Disabled`, `assertThrows(AssertionError.class, ...)`
+around the body, or a custom extension. TestNG's `expectedExceptions` is close.
+
+### The defects recorded this way
+| ID | Where | What happens |
+|---|---|---|
+| DEF-01 | CHK-09 | Checkout can be started and completed with an empty cart ($0.00 order) |
+| DEF-02 | APP-01 | After Reset App State, buttons still say "Remove" until the page is reloaded |
+| DEF-P1..P4 | USR-01 | problem_user: same picture everywhere, sorting ignored, three products cannot be added, Last Name field broken |
+| DEF-E1..E3 | USR-03 | error_user: sorting raises an alert, three products cannot be added, Finish does nothing |
+| DEF-V1 | USR-04 | visual_user: wrong picture, changing prices, misaligned elements |
+
+The problem_user, error_user and visual_user behaviours are built into SauceDemo on purpose
+for practice. DEF-01 and DEF-02 are our own findings; their "expected" behaviour is our
+assumption, because SauceDemo publishes no requirements.
