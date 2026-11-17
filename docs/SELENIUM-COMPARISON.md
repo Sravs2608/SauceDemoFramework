@@ -376,3 +376,310 @@ A reviewer coming from Selenium can read these classes straight away.
 
 ### 6. No direct equivalent?
 Not applicable; both support the pattern.
+
+---
+
+## 5. Configuration (`playwright.config.ts`)
+
+**File:** `playwright.config.ts`
+
+### 1. What it does
+One file answers the run-level questions: where are the tests, which browsers, how many in
+parallel, retry or not, what evidence to keep on failure, which report, which base URL.
+
+### 2. Playwright (our code)
+```ts
+export default defineConfig({
+  testDir: './tests',
+  globalSetup: './global-setup.ts',
+  fullyParallel: true,
+  forbidOnly: isCI,
+  retries: isCI ? 2 : 0,
+  workers: isCI ? 2 : undefined,
+  reporter: [['list'], ['html', { open: 'never' }]],
+  use: {
+    baseURL: env.baseUrl,
+    testIdAttribute: 'data-test',
+    storageState: STORAGE_STATE,
+    trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
+  },
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+    { name: 'webkit', use: { ...devices['Desktop Safari'] } },
+    { name: 'mobile-chrome', use: { ...devices['Pixel 7'] }, grep: /@smoke/ },
+  ],
+});
+```
+
+### 3. Selenium Java equivalent
+Selenium is a browser-driving library, not a test runner, so the same settings are spread
+over several files. A typical TestNG setup:
+
+```xml
+<!-- testng.xml: what runs, in parallel, once per browser -->
+<suite name="SauceDemo" parallel="methods" thread-count="4">
+  <test name="chromium">
+    <parameter name="browser" value="chrome"/>
+    <packages><package name="tests.ui.*"/></packages>
+  </test>
+  <test name="firefox">
+    <parameter name="browser" value="firefox"/>
+    <packages><package name="tests.ui.*"/></packages>
+  </test>
+</suite>
+```
+```java
+// DriverFactory.java: which browser, headless or not, one driver per thread
+public final class DriverFactory {
+    private static final ThreadLocal<WebDriver> DRIVER = new ThreadLocal<>();
+
+    public static WebDriver start(String browser) {
+        WebDriver driver = switch (browser) {
+            case "firefox" -> new FirefoxDriver(new FirefoxOptions().addArguments("-headless"));
+            default        -> new ChromeDriver(new ChromeOptions().addArguments("--headless=new"));
+        };
+        DRIVER.set(driver);
+        return driver;
+    }
+
+    public static WebDriver get() { return DRIVER.get(); }
+
+    public static void stop() {
+        DRIVER.get().quit();
+        DRIVER.remove();
+    }
+}
+
+// RetryAnalyzer.java: retries
+public class RetryAnalyzer implements IRetryAnalyzer {
+    private int attempts = 0;
+    @Override
+    public boolean retry(ITestResult result) {
+        return attempts++ < 2;
+    }
+}
+
+// ScreenshotListener.java: evidence on failure
+public class ScreenshotListener implements ITestListener {
+    @Override
+    public void onTestFailure(ITestResult result) {
+        File shot = ((TakesScreenshot) DriverFactory.get()).getScreenshotAs(OutputType.FILE);
+        // copy the file into the report folder / attach to Allure
+    }
+}
+```
+Mobile emulation in Selenium is Chrome-only, through
+`ChromeOptions.setExperimentalOption("mobileEmulation", Map.of("deviceName", "Pixel 7"))`.
+
+### 4. Key differences
+| Setting | Playwright | Selenium Java |
+|---|---|---|
+| Browsers | `projects` array | `DriverFactory` + `testng.xml` parameters |
+| Parallel | `fullyParallel`, `workers` | `testng.xml` / Surefire forks + `ThreadLocal<WebDriver>` |
+| Retries | `retries: 2` | `IRetryAnalyzer` class |
+| Screenshot / video / trace | Three lines under `use` | Listener for screenshots; video and trace need other tools |
+| Report | Built-in HTML reporter | Allure / ExtentReports dependency |
+| Base URL | `baseURL` | Your own config helper |
+| Safari engine | WebKit on Windows/Linux/macOS | SafariDriver, macOS only |
+| Driver binaries | `npx playwright install` | Selenium Manager (built into Selenium 4.6+) |
+
+### 5. Which is better here and why
+Playwright, clearly, for setup effort: what took a DriverFactory, a retry class, a listener,
+an XML file and a reporting library is about thirty lines here. Selenium's advantage is
+freedom: it plugs into any runner, language and grid a company already has.
+
+### 6. No direct equivalent?
+Selenium has no single config file and no trace recording. The workaround is the
+collection of classes above plus a reporting library; there is no workaround that gives a
+Playwright-style trace (DOM snapshot + network + console for every step).
+
+---
+
+## 6. Fixtures vs `@BeforeEach` / base class
+
+**File:** `src/fixtures/test.ts`
+
+### 1. What it does
+A fixture is something a test needs before it starts (a page, a page object, test data),
+prepared automatically and cleaned up afterwards. A test asks for fixtures by name in its
+parameter list and gets exactly those, freshly made for that test.
+
+### 2. Playwright (our code)
+```ts
+// src/fixtures/test.ts
+export const test = base.extend<PageObjects>({
+  loginPage: async ({ page }, use) => {
+    await use(new LoginPage(page));
+  },
+  inventoryPage: async ({ page }, use) => {
+    await use(new InventoryPage(page));
+  },
+  // ...one per page object
+});
+
+// a test asks only for what it uses
+test('CART-01: add one item, badge shows 1', { tag: '@smoke' }, async ({ inventoryPage, cartPage }) => {
+  await inventoryPage.open();
+  // ...
+});
+```
+`page` itself is a built-in fixture: a new tab in a new, isolated browser context per test,
+closed automatically when the test ends. Code written before `use(...)` is setup; code
+after it is teardown.
+
+### 3. Selenium Java equivalent
+```java
+public abstract class BaseTest {
+    protected WebDriver driver;
+    protected String baseUrl;
+    protected LoginPage loginPage;
+    protected InventoryPage inventoryPage;
+    protected CartPage cartPage;
+
+    @BeforeEach
+    void setUp() {
+        baseUrl = ConfigReader.required("BASE_URL");
+        driver = new ChromeDriver(new ChromeOptions().addArguments("--headless=new"));
+        loginPage = new LoginPage(driver);
+        inventoryPage = new InventoryPage(driver);
+        cartPage = new CartPage(driver);
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (driver != null) {
+            driver.quit();
+        }
+    }
+}
+
+class CartTest extends BaseTest {
+    @Test
+    void cart01_addOneItemBadgeShowsOne() {
+        // driver and page objects come from BaseTest
+    }
+}
+```
+
+### 4. Key differences
+- **On demand:** a fixture is built only if the test names it. `BaseTest.setUp()` builds
+  everything for every test.
+- **Composition:** a test can combine any fixtures. A Java class can extend only one base
+  class, so shared setup tends to pile up in one large `BaseTest`.
+- **Setup and teardown together:** both sit in one function around `use()`. In Java they
+  are two separate methods that must be kept in step.
+- **Isolation:** the built-in `page` fixture gives each test its own browser context
+  (cookies, localStorage). That is why AUTH-08 can log out without disturbing any other test.
+- **Parallel safety:** fixtures are per test by design. Selenium needs `ThreadLocal<WebDriver>`.
+
+### 5. Which is better here and why
+Playwright. Fixtures remove the base class, and tests state their needs in their own
+signature, which makes each test easier to read and review.
+
+### 6. No direct equivalent?
+Selenium (with JUnit/TestNG) has no fixtures. The usual workaround is the `BaseTest` class
+shown above. JUnit 5 extensions with a `ParameterResolver` can inject objects into test
+methods and come closest, but few Selenium projects use them.
+
+---
+
+## 7. Login reuse: `storageState` vs cookie injection
+
+**Files:** `global-setup.ts`, `playwright.config.ts` (`storageState`), `tests/ui/auth/auth.spec.ts`
+
+### 1. What it does
+Logging in through the UI before every test is slow and adds a failure point to tests
+that are not about login. Instead we log in **once** before the run, save the browser's
+cookies and localStorage to a file, and start every test from that saved state. Only the
+login tests switch it off.
+
+What we verified on SauceDemo: login sets one cookie, `session-username=<username>`, and
+that cookie is the session. The site gives it a 10-minute lifetime, so global setup saves
+it as a session cookie (no expiry date) to keep long runs safe. The cart lives in
+localStorage (`cart-contents`), which is empty in the saved file, so every test starts
+with an empty cart.
+
+### 2. Playwright (our code)
+```ts
+// global-setup.ts (runs once)
+const context = await browser.newContext({ baseURL: env.baseUrl });
+const page = await context.newPage();
+const loginPage = new LoginPage(page);
+await loginPage.open();
+await loginPage.login(users.standard);
+await new InventoryPage(page).expectLoaded();   // save only after login really worked
+
+const state = await context.storageState();
+for (const cookie of state.cookies) {
+  if (cookie.name === 'session-username') {
+    cookie.expires = -1;                         // session cookie, no 10-minute limit
+  }
+}
+fs.writeFileSync(STORAGE_STATE, JSON.stringify(state, null, 2));
+
+// playwright.config.ts: every test starts from that file
+use: { storageState: STORAGE_STATE }
+
+// tests/ui/auth/auth.spec.ts: login tests start logged out
+test.use({ storageState: { cookies: [], origins: [] } });
+```
+
+### 3. Selenium Java equivalent
+```java
+public final class SessionStore {
+    private static Set<Cookie> savedCookies;
+
+    // call once, e.g. from @BeforeAll in a suite-level class or TestNG @BeforeSuite
+    public static synchronized void loginOnce(String baseUrl, User user) {
+        if (savedCookies != null) {
+            return;
+        }
+        WebDriver driver = new ChromeDriver(new ChromeOptions().addArguments("--headless=new"));
+        try {
+            driver.get(baseUrl);
+            new LoginPage(driver).login(user);
+            new WebDriverWait(driver, Duration.ofSeconds(10))
+                .until(ExpectedConditions.urlContains("inventory.html"));
+            savedCookies = driver.manage().getCookies();
+        } finally {
+            driver.quit();
+        }
+    }
+
+    // call in @BeforeEach of tests that should start logged in
+    public static void apply(WebDriver driver, String baseUrl) {
+        driver.get(baseUrl);                       // must be on the domain first
+        for (Cookie c : savedCookies) {
+            // rebuild without the expiry date -> session cookie
+            driver.manage().addCookie(new Cookie(c.getName(), c.getValue(), c.getPath()));
+        }
+        driver.get(baseUrl + "/inventory.html");
+    }
+}
+```
+
+### 4. Key differences
+| | Playwright `storageState` | Selenium cookie injection |
+|---|---|---|
+| What is saved | Cookies + localStorage, one call | Cookies only; localStorage needs `JavascriptExecutor` |
+| When applied | Before the first page loads | After opening a page on the domain, then reload |
+| Per-test isolation | Each test gets its own copy | Your code must add cookies to each new driver |
+| Switch off for some tests | `test.use({ storageState: ... })` | A different base class or a flag |
+| Several users | One file per user | One cookie set per user, managed by you |
+
+### 5. Which is better here and why
+Playwright. It is a built-in, three-line feature, and it is also why the smoke tests are
+short: CART-01 and CHK-01 contain no login step at all.
+
+### 6. No direct equivalent?
+Correct, Selenium has no `storageState`. The workaround is the cookie injection above.
+Things to tell a Selenium team: cookies can only be added for the domain currently open,
+`HttpOnly`/`Secure` flags must be preserved when the site uses them, and localStorage or
+sessionStorage must be copied separately with JavaScript.
+
+**Not verified:** a single run lasting longer than 10 minutes (the reason for removing the
+expiry date). The site accepting a `session-username` cookie without an expiry date *was*
+verified.
