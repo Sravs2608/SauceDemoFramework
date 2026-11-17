@@ -117,6 +117,118 @@ test.describe('Authentication - starting logged out', () => {
       await expect(inventoryPage.items).toHaveCount(0);
     });
   });
+
+  const rejectedLogins = [
+    {
+      id: 'AUTH-02',
+      title: 'wrong password shows error',
+      username: users.standard.username,
+      password: 'wrong_password',
+      expectedError: loginErrors.credentialsMismatch,
+    },
+    {
+      id: 'AUTH-03',
+      title: 'unknown username shows error',
+      username: 'no_such_user',
+      password: users.standard.password,
+      expectedError: loginErrors.credentialsMismatch,
+    },
+    {
+      id: 'AUTH-04',
+      title: 'empty username shows required error',
+      username: '',
+      password: users.standard.password,
+      expectedError: loginErrors.usernameRequired,
+    },
+    {
+      id: 'AUTH-05',
+      title: 'empty password shows required error',
+      username: users.standard.username,
+      password: '',
+      expectedError: loginErrors.passwordRequired,
+    },
+  ];
+
+  /**
+   * AUTH-02 to AUTH-05: four rejected logins that differ only in their data (what is
+   * typed, which message is expected). The test body is written once and the loop creates
+   * one separate, independently reported test per row of `rejectedLogins`.
+   *
+   * SELENIUM JAVA EQUIVALENT:
+   *   @ParameterizedTest(name = "{0}: {1}")
+   *   @Tag("regression")
+   *   @CsvSource(nullValues = "EMPTY", value = {
+   *       "AUTH-02, wrong password,  standard_user, wrong_password, Epic sadface: Username and password do not match any user in this service",
+   *       "AUTH-03, unknown user,    no_such_user,  secret_sauce,   Epic sadface: Username and password do not match any user in this service",
+   *       "AUTH-04, empty username,  '',            secret_sauce,   Epic sadface: Username is required",
+   *       "AUTH-05, empty password,  standard_user, '',             Epic sadface: Password is required"
+   *   })
+   *   void rejectedLogin(String id, String title, String username, String password, String expectedError) {
+   *       driver.get(baseUrl);
+   *       loginPage.login(new User(username, password));
+   *       WebElement error = new WebDriverWait(driver, Duration.ofSeconds(5))
+   *           .until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector("[data-test='error']")));
+   *       assertEquals(expectedError, error.getText());
+   *       assertEquals(baseUrl + "/", driver.getCurrentUrl());
+   *   }
+   *   // TestNG: @Test(dataProvider = "rejectedLogins") with a @DataProvider method
+   *
+   * DIFFERENCE: Playwright has no special annotation for data-driven tests; a plain
+   *   `for` loop around test() does it, because tests are just function calls. JUnit 5
+   *   needs @ParameterizedTest with a source (@CsvSource, @MethodSource) and TestNG needs
+   *   a @DataProvider. In all three, each row is reported as its own test.
+   */
+  for (const attempt of rejectedLogins) {
+    test(`${attempt.id}: ${attempt.title}`, { tag: '@regression' }, async ({ loginPage, inventoryPage }) => {
+      await test.step('Open the login page', async () => {
+        await loginPage.open();
+      });
+
+      await test.step('Submit the login form', async () => {
+        await loginPage.login({ username: attempt.username, password: attempt.password });
+      });
+
+      await test.step('Login is refused with the expected message', async () => {
+        await expect(loginPage.errorMessage).toHaveText(attempt.expectedError);
+        // The site marks the fields in red by adding the class "input_error".
+        await expect(loginPage.usernameInput).toHaveClass(/input_error/);
+        await loginPage.expectLoaded();
+        await expect(inventoryPage.items).toHaveCount(0);
+      });
+    });
+  }
+
+  /**
+   * AUTH-07: protected pages cannot be opened by typing their address while logged out.
+   * The application sends the visitor back to the login page with a message naming the
+   * page. Checked for the Products page and the cart.
+   *
+   * SELENIUM JAVA EQUIVALENT:
+   *   @ParameterizedTest @Tag("regression")
+   *   @ValueSource(strings = {"/inventory.html", "/cart.html"})
+   *   void auth07_protectedPageIsBlockedWithoutLogin(String path) {
+   *       driver.get(baseUrl + path);
+   *       WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+   *       wait.until(ExpectedConditions.urlToBe(baseUrl + "/"));
+   *       WebElement error = wait.until(ExpectedConditions.visibilityOfElementLocated(
+   *           By.cssSelector("[data-test='error']")));
+   *       assertEquals("Epic sadface: You can only access '" + path + "' when you are logged in.",
+   *           error.getText());
+   *   }
+   *
+   * DIFFERENCE: page.goto uses the relative address with baseURL; the redirect and the
+   *   message are checked with retrying assertions, so no explicit wait is written.
+   */
+  test('AUTH-07: inventory URL without login is blocked', { tag: '@regression' }, async ({ page, loginPage }) => {
+    for (const path of ['/inventory.html', '/cart.html']) {
+      await test.step(`Opening ${path} directly returns to login with a message`, async () => {
+        await page.goto(path);
+        await expect(page).toHaveURL('/');
+        await expect(loginPage.errorMessage).toHaveText(restrictedPageError(path));
+        await loginPage.expectLoaded();
+      });
+    }
+  });
 });
 
 /**
