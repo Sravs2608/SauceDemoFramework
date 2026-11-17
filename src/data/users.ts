@@ -18,4 +18,12 @@ export const users = {
   standard: { username: env.standardUser, password: env.password },
   /** Account that the application refuses to log in (AUTH-06). */
   lockedOut: { username: env.lockedOutUser, password: env.password },
+  /** Account for which the application deliberately misbehaves (USR-01). */
+  problem: { username: env.problemUser, password: env.password },
+  /** Account whose login takes about five seconds (USR-02). */
+  performanceGlitch: { username: env.performanceGlitchUser, password: env.password },
+  /** Account for which some actions fail with errors (USR-03). */
+  error: { username: env.errorUser, password: env.password },
+  /** Account that sees visual differences: wrong image, misaligned elements (USR-04). */
+  visual: { username: env.visualUser, password: env.password },
 } satisfies Record<string, User>;

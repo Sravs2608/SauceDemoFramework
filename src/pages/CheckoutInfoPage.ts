@@ -14,9 +14,14 @@ export class CheckoutInfoPage extends BasePage {
   readonly lastNameInput: Locator;
   readonly postalCodeInput: Locator;
   readonly continueButton: Locator;
+  readonly cancelButton: Locator;
+  /** The red message shown when a required field is empty. */
+  readonly errorMessage: Locator;
 
   constructor(page: Page) {
     super(page);
+    this.cancelButton = page.getByTestId('cancel');
+    this.errorMessage = page.getByTestId('error');
     this.firstNameInput = page.getByTestId('firstName');
     this.lastNameInput = page.getByTestId('lastName');
     this.postalCodeInput = page.getByTestId('postalCode');
@@ -54,5 +59,18 @@ export class CheckoutInfoPage extends BasePage {
    */
   async continueToOverview(): Promise<void> {
     await this.continueButton.click();
+  }
+
+  /**
+   * Clicks Cancel. On this step it returns to the cart.
+   *
+   * SELENIUM JAVA EQUIVALENT:
+   *   driver.findElement(By.cssSelector("[data-test='cancel']")).click();
+   *
+   * DIFFERENCE: Nearly identical; Playwright additionally checks the button is visible,
+   *   stable and enabled before clicking.
+   */
+  async cancel(): Promise<void> {
+    await this.cancelButton.click();
   }
 }

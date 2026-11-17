@@ -51,6 +51,10 @@ export const env = {
   baseUrl: required('BASE_URL'),
   standardUser: required('STANDARD_USER'),
   lockedOutUser: required('LOCKED_OUT_USER'),
+  problemUser: required('PROBLEM_USER'),
+  performanceGlitchUser: required('PERFORMANCE_GLITCH_USER'),
+  errorUser: required('ERROR_USER'),
+  visualUser: required('VISUAL_USER'),
   password: required('SAUCE_PASSWORD'),
 };
 

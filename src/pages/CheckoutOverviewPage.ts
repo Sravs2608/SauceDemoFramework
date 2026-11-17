@@ -17,9 +17,13 @@ export class CheckoutOverviewPage extends BasePage {
   /** Shows e.g. "Total: $32.39". */
   readonly totalLabel: Locator;
   readonly finishButton: Locator;
+  readonly cancelButton: Locator;
+  readonly itemPrices: Locator;
 
   constructor(page: Page) {
     super(page);
+    this.cancelButton = page.getByTestId('cancel');
+    this.itemPrices = page.getByTestId('inventory-item-price');
     this.itemNames = page.getByTestId('inventory-item-name');
     this.subtotalLabel = page.getByTestId('subtotal-label');
     this.taxLabel = page.getByTestId('tax-label');
@@ -42,5 +46,19 @@ export class CheckoutOverviewPage extends BasePage {
    */
   async finish(): Promise<void> {
     await this.finishButton.click();
+  }
+
+  /**
+   * Clicks Cancel. On the overview it returns to the Products page (not to the cart).
+   *
+   * SELENIUM JAVA EQUIVALENT:
+   *   new WebDriverWait(driver, Duration.ofSeconds(10))
+   *       .until(ExpectedConditions.elementToBeClickable(By.cssSelector("[data-test='cancel']")))
+   *       .click();
+   *
+   * DIFFERENCE: Auto-waiting click in Playwright versus explicit WebDriverWait in Selenium.
+   */
+  async cancel(): Promise<void> {
+    await this.cancelButton.click();
   }
 }

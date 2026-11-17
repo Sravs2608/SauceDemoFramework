@@ -7,12 +7,14 @@ import { type Locator, type Page } from '@playwright/test';
 export class Menu {
   readonly openButton: Locator;
   readonly logoutLink: Locator;
+  readonly resetLink: Locator;
 
   constructor(page: Page) {
     // The burger button has no data-test attribute, so we find it the way a user or a
     // screen reader does: a button whose accessible name is "Open Menu".
     this.openButton = page.getByRole('button', { name: 'Open Menu' });
     this.logoutLink = page.getByTestId('logout-sidebar-link');
+    this.resetLink = page.getByTestId('reset-sidebar-link');
   }
 
   /**
@@ -49,5 +51,23 @@ export class Menu {
   async logout(): Promise<void> {
     await this.open();
     await this.logoutLink.click();
+  }
+
+  /**
+   * Opens the menu and clicks "Reset App State", which empties the cart. The menu stays
+   * open afterwards (verified on the live site).
+   *
+   * SELENIUM JAVA EQUIVALENT:
+   *   WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(10));
+   *   wait.until(ExpectedConditions.elementToBeClickable(By.id("react-burger-menu-btn"))).click();
+   *   wait.until(ExpectedConditions.elementToBeClickable(
+   *       By.cssSelector("[data-test='reset-sidebar-link']"))).click();
+   *
+   * DIFFERENCE: Same as logout(): Playwright waits for the sliding menu to stop moving
+   *   before it clicks; Selenium's elementToBeClickable does not check for animation.
+   */
+  async resetAppState(): Promise<void> {
+    await this.open();
+    await this.resetLink.click();
   }
 }

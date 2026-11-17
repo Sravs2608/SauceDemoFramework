@@ -1,12 +1,23 @@
 /**
  * Role: the exact error messages the application shows, copied from the live site
- * (docs/VERIFIED-LOCATORS.md and the Phase 1 checks on 2026-11-16). Keeping them in one
- * file means a wording change in the application is fixed in one place.
+ * (docs/VERIFIED-LOCATORS.md, checked on 2026-11-16). Keeping them in one file means a
+ * wording change in the application is fixed in one place.
  *
  * Selenium Java projects use a constants class or a messages.properties file for this.
  */
 export const loginErrors = {
+  /** Shown for a wrong password AND for an unknown username (same text for both). */
+  credentialsMismatch: 'Epic sadface: Username and password do not match any user in this service',
+  usernameRequired: 'Epic sadface: Username is required',
+  passwordRequired: 'Epic sadface: Password is required',
   lockedOut: 'Epic sadface: Sorry, this user has been locked out.',
+};
+
+/** Shown on "Checkout: Your Information" when a field is left empty. */
+export const checkoutErrors = {
+  firstNameRequired: 'Error: First Name is required',
+  lastNameRequired: 'Error: Last Name is required',
+  postalCodeRequired: 'Error: Postal Code is required',
 };
 
 /**

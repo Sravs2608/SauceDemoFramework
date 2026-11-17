@@ -892,3 +892,203 @@ both tools.
 Selenium has no trace artifact and no Safari-engine run on Linux. Workarounds: screenshots
 and browser logs saved by a listener, a video recorder such as Selenoid/Selenium Grid
 video, and macOS runners or a cloud provider (Sauce Labs, BrowserStack) for Safari.
+
+---
+
+# Phase 2 topics
+
+## 11. Dropdowns: `selectOption` vs the `Select` class
+
+**Files:** `src/pages/InventoryPage.ts` (`sortBy`), `tests/ui/inventory/inventory.spec.ts`
+
+### 1. What it does
+Chooses a value in the sort dropdown on the Products page, which is a normal HTML
+`<select>` with four options (`az`, `za`, `lohi`, `hilo`).
+
+### 2. Playwright (our code)
+```ts
+this.sortDropdown = page.getByTestId('product-sort-container');
+
+async sortBy(option: SortOption): Promise<void> {
+  await this.sortDropdown.selectOption(option.value);
+}
+
+// in the test: the list is checked against an order we calculate ourselves
+await inventoryPage.sortBy(sortOptions.priceAsc);
+await expect(inventoryPage.itemNames).toHaveText(expected.map((product) => product.name));
+```
+
+### 3. Selenium Java equivalent
+```java
+import org.openqa.selenium.support.ui.Select;
+
+public void sortBy(SortOption option) {
+    WebElement dropdown = wait.until(ExpectedConditions.elementToBeClickable(
+            By.cssSelector("[data-test='product-sort-container']")));
+    new Select(dropdown).selectByValue(option.getValue());
+}
+
+// in the test: wait until the redrawn list equals the expected order
+List<String> expectedNames = Products.expectedOrder(option).stream().map(Product::getName).toList();
+wait.until(d -> d.findElements(By.cssSelector("[data-test='inventory-item-name']"))
+        .stream().map(WebElement::getText).toList().equals(expectedNames));
+```
+
+### 4. Key differences
+- `selectOption` is a method on any locator and can select by value, by label
+  (`{ label: 'Price (low to high)' }`) or by index. Selenium wraps a `WebElement` in the
+  separate `Select` class (`selectByValue`, `selectByVisibleText`, `selectByIndex`).
+- After sorting, React redraws the list. Playwright's list assertion retries by itself;
+  Selenium needs a custom wait, and elements found before the redraw are stale.
+- Both work only on a real `<select>`. Dropdowns built from `<div>`s are clicked like
+  ordinary elements in either tool.
+
+### 5. Which is better here and why
+Playwright, slightly: one call, no helper class, no stale elements after the redraw.
+
+### 6. No direct equivalent?
+Not applicable; both support it.
+
+---
+
+## 12. Preparing test state without the UI (`seedCart`)
+
+**Files:** `src/fixtures/test.ts` (`seedCart`), used by cart and checkout tests
+
+### 1. What it does
+Many tests need "a cart with products in it" only as a starting point. Clicking "Add to
+cart" in every one of them is slow and adds failure points unrelated to the test. SauceDemo
+keeps the cart in the browser's localStorage (`cart-contents`, a list of product ids;
+verified), so the fixture writes that list directly and reloads the page. Tests *about*
+adding (CART-01, CART-02, CART-03, CART-05) still use the buttons.
+
+### 2. Playwright (our code)
+```ts
+seedCart: async ({ page }, use) => {
+  await use(async (items: Product[]) => {
+    const ids = items.map((item) => item.id);
+    await page.goto('/inventory.html');
+    await page.evaluate((cartIds) => {
+      window.localStorage.setItem('cart-contents', JSON.stringify(cartIds));
+    }, ids);
+    await page.reload();
+  });
+},
+
+// in a test
+await seedCart([products.backpack, products.onesie]);
+await cartPage.open();
+```
+
+### 3. Selenium Java equivalent
+```java
+// in BaseTest or a CartHelper class
+protected void seedCart(List<Product> items) {
+    driver.get(baseUrl + "/inventory.html");
+    String ids = items.stream()
+            .map(p -> String.valueOf(p.getId()))
+            .collect(Collectors.joining(",", "[", "]"));
+    ((JavascriptExecutor) driver).executeScript(
+            "window.localStorage.setItem('cart-contents', arguments[0]);", ids);
+    driver.navigate().refresh();
+}
+```
+
+### 4. Key differences
+- Both run JavaScript in the page: `page.evaluate(fn, arg)` passes a real function and
+  typed arguments; `JavascriptExecutor.executeScript` takes the script as a string with
+  `arguments[0]`.
+- In Playwright the helper is a fixture requested by name; in Selenium it is a method
+  inherited from `BaseTest`.
+- The technique depends on how this application stores its cart. On an application with a
+  server-side cart, the same idea is done through an API call (Phase 4 topic).
+
+### 5. Which is better here and why
+Equal in capability; Playwright's version is safer to write (no script-in-a-string) and
+neater to share (fixture).
+
+### 6. No direct equivalent?
+Not applicable. Selenium 4 Chromium drivers also expose `WebStorage`/`LocalStorage`
+classes, but `JavascriptExecutor` is the portable way.
+
+---
+
+## 13. Data-driven tests: a `for` loop vs `@ParameterizedTest` / `@DataProvider`
+
+**Files:** `tests/ui/auth/auth.spec.ts` (AUTH-02 to AUTH-05), `inventory.spec.ts`
+(INV-02 to INV-05), `checkout.spec.ts` (CHK-03 to CHK-05)
+
+### 1. What it does
+Several test cases follow the same steps and differ only in data. The steps are written
+once and a table of data produces one separate test per row, each with its own test case
+ID in the title and its own line in the report.
+
+### 2. Playwright (our code)
+```ts
+const rejectedLogins = [
+  { id: 'AUTH-02', title: 'wrong password shows error', username: users.standard.username,
+    password: 'wrong_password', expectedError: loginErrors.credentialsMismatch },
+  { id: 'AUTH-04', title: 'empty username shows required error', username: '',
+    password: users.standard.password, expectedError: loginErrors.usernameRequired },
+  // ...
+];
+
+for (const attempt of rejectedLogins) {
+  test(`${attempt.id}: ${attempt.title}`, { tag: '@regression' }, async ({ loginPage }) => {
+    await loginPage.open();
+    await loginPage.login({ username: attempt.username, password: attempt.password });
+    await expect(loginPage.errorMessage).toHaveText(attempt.expectedError);
+  });
+}
+```
+
+### 3. Selenium Java equivalent
+```java
+// JUnit 5
+@ParameterizedTest(name = "{0}: {1}")
+@Tag("regression")
+@MethodSource("rejectedLogins")
+void rejectedLogin(String id, String title, String username, String password, String expectedError) {
+    driver.get(baseUrl);
+    loginPage.login(new User(username, password));
+    WebElement error = new WebDriverWait(driver, Duration.ofSeconds(5))
+            .until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector("[data-test='error']")));
+    assertEquals(expectedError, error.getText());
+}
+
+static Stream<Arguments> rejectedLogins() {
+    return Stream.of(
+        Arguments.of("AUTH-02", "wrong password shows error", "standard_user", "wrong_password",
+            "Epic sadface: Username and password do not match any user in this service"),
+        Arguments.of("AUTH-04", "empty username shows required error", "", "secret_sauce",
+            "Epic sadface: Username is required"));
+}
+
+// TestNG
+@DataProvider(name = "rejectedLogins")
+public Object[][] rejectedLogins() {
+    return new Object[][] {
+        {"AUTH-02", "standard_user", "wrong_password", "Epic sadface: Username and password do not match any user in this service"},
+        {"AUTH-04", "", "secret_sauce", "Epic sadface: Username is required"},
+    };
+}
+
+@Test(dataProvider = "rejectedLogins", groups = "regression")
+public void rejectedLogin(String id, String username, String password, String expectedError) { ... }
+```
+
+### 4. Key differences
+- Playwright needs no special feature: `test()` is a function call, so a loop creates
+  tests. JUnit 5 needs `@ParameterizedTest` plus a source annotation (and the
+  `junit-jupiter-params` dependency); TestNG needs a `@DataProvider`.
+- The data rows are typed objects with named fields (`attempt.expectedError`); in Java they
+  are positional arguments, which are easier to mix up.
+- All three report each row as its own test, and a single row can be run alone
+  (`npx playwright test -g "AUTH-04"`).
+
+### 5. Which is better here and why
+Playwright for simplicity. JUnit's sources (`@CsvFileSource`, `@EnumSource`) are handy when
+test data lives in files; in Playwright you would read the file yourself and loop over it.
+
+### 6. No direct equivalent?
+Not applicable; all runners support it.
