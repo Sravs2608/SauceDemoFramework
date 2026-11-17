@@ -50,9 +50,14 @@ export default defineConfig({
   // In CI, fail the run if someone committed test.only by mistake.
   forbidOnly: isCI,
 
-  // Retry only in CI. Locally a failure should be seen and understood immediately.
-  retries: isCI ? 2 : 0,
-  workers: isCI ? 2 : undefined,
+  // Retries: a failed test is run again, 1 time locally and up to 2 times in CI. A test
+  // that fails and then passes is reported as "flaky" (not as passed), so the problem
+  // stays visible. Retries protect the run from one-off environment hiccups (we saw
+  // random network errors and timeouts); they are not a way to hide a real defect.
+  retries: isCI ? 2 : 1,
+  // 4 locally as a safe default: with Playwright's default (8 on this machine) full runs
+  // had random timeouts. The cause is not confirmed yet. 2 in CI (smaller machines).
+  workers: isCI ? 2 : 4,
 
   // 'list' prints progress in the terminal; 'html' builds the report in playwright-report/.
   reporter: isCI
@@ -69,9 +74,16 @@ export default defineConfig({
     // Every test starts already logged in as standard_user (session saved by global setup).
     storageState: STORAGE_STATE,
 
-    // Evidence for failures: a full trace on the first retry, plus screenshot and video.
+    // Trace = a recording of every step (DOM snapshot, network, console) that you open
+    // with `npx playwright show-trace`. 'on-first-retry' records it only when a failed
+    // test is retried, so passing tests pay no cost and every retried failure has one.
     trace: 'on-first-retry',
+
+    // Screenshot of the page at the moment a test fails. Nothing is saved for passes.
     screenshot: 'only-on-failure',
+
+    // Video of the whole test. It is recorded for every test but kept only when the
+    // test fails; videos of passing tests are deleted.
     video: 'retain-on-failure',
   },
 
