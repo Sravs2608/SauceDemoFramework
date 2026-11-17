@@ -1759,3 +1759,94 @@ Not applicable.
 | `test.slow()` | Triple the time limit | `@Timeout` / `timeOut` |
 | `annotation: { type: 'defect', description }` | Free-form note shown in the report | Allure `@Issue`, `@Link` |
 | `test.describe.configure({ mode: 'serial' })` | Run a group in order, stop at first failure (avoid: tests should be independent) | `@TestMethodOrder` / `dependsOnMethods` |
+
+---
+
+## 24. Sharding: splitting a run across CI machines
+
+**File:** `.github/workflows/playwright.yml` (jobs `regression` and `merge-reports`)
+
+### 1. What it does
+Parallel *workers* use the CPU cores of one machine. *Sharding* goes further: the suite is
+cut into N parts and N machines run one part each at the same time. Each machine saves a
+raw "blob" report, and a final job merges the blobs into one ordinary HTML report, so the
+team still reads a single report.
+
+In our pipeline the full suite (manual trigger) runs as 4 shards; the smoke run on every
+push stays on one machine because it is small.
+
+### 2. Playwright (our code)
+```yaml
+regression:
+  strategy:
+    fail-fast: false
+    matrix:
+      shard: [1, 2, 3, 4]
+  steps:
+    # ...checkout, node, npm ci, install browsers...
+    - run: npx playwright test --shard=${{ matrix.shard }}/4 --reporter=blob,list
+    - uses: actions/upload-artifact@v7
+      if: ${{ !cancelled() }}
+      with:
+        name: blob-report-${{ matrix.shard }}
+        path: blob-report/
+
+merge-reports:
+  needs: regression
+  if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' }}
+  steps:
+    # ...checkout, node, npm ci...
+    - uses: actions/download-artifact@v8
+      with:
+        path: all-blob-reports
+        pattern: blob-report-*
+        merge-multiple: true
+    - run: npx playwright merge-reports --reporter html ./all-blob-reports
+```
+Checked locally: `npx playwright test --project=chromium --shard=1/2 --reporter=blob,list`
+ran 26 of the 52 tests, and `npx playwright merge-reports --reporter html ./blob-report`
+built the HTML report. The GitHub jobs themselves have not been run yet.
+
+### 3. Selenium Java equivalent
+Neither Selenium nor JUnit/TestNG has a shard option. Common ways to get the same effect:
+
+```yaml
+# 1) Split by hand in the CI matrix: by tag, package or TestNG suite file
+strategy:
+  fail-fast: false
+  matrix:
+    suite: [auth, inventory, cart, checkout]
+steps:
+  - run: mvn -B test -Dgroups=${{ matrix.suite }}
+  - uses: actions/upload-artifact@v7
+    if: ${{ !cancelled() }}
+    with:
+      name: allure-results-${{ matrix.suite }}
+      path: target/allure-results/
+# final job: download all allure-results-* into one folder, then
+#   allure generate all-results --clean -o allure-report
+```
+```xml
+<!-- 2) One machine, many browsers: TestNG parallel threads against a Selenium Grid -->
+<suite name="Regression" parallel="methods" thread-count="8"> ... </suite>
+```
+```java
+WebDriver driver = new RemoteWebDriver(new URL("http://grid:4444"), new ChromeOptions());
+```
+
+### 4. Key differences
+| | Playwright | Selenium Java |
+|---|---|---|
+| Split the suite | `--shard=x/N`, automatic and even | By hand (tags, packages, suite files); parts drift out of balance |
+| Merge results | `merge-reports` on blob reports | Allure merges result folders; Surefire XML needs a plugin |
+| More browsers at once | More shards or workers | Selenium Grid (hub + nodes) or a cloud grid |
+| Infrastructure | None beyond CI machines | Grid to install and maintain, or a paid service |
+
+### 5. Which is better here and why
+Playwright: one flag and one merge command, no grid. Selenium Grid is the stronger answer
+when many *different* real browsers and devices are needed, which is why cloud providers
+build on it.
+
+### 6. No direct equivalent?
+Correct, no `--shard` in the Selenium/JUnit/TestNG world. Workarounds as shown: a manual
+matrix split, or Selenium Grid with parallel threads.
