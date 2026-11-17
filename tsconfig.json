@@ -1,0 +1,17 @@
+{
+  // Role: tells the TypeScript compiler (and ESLint) how to type-check this project.
+  // Playwright compiles the tests itself when they run, so we never produce .js files
+  // ("noEmit"). This file exists only so `npm run typecheck` and the editor can catch
+  // mistakes (wrong argument, typo in a property name) before a test is ever run.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "noEmit": true,
+    "types": ["node"],
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src", "tests", "playwright.config.ts", "global-setup.ts"]
+}
