@@ -683,3 +683,128 @@ sessionStorage must be copied separately with JavaScript.
 **Not verified:** a single run lasting longer than 10 minutes (the reason for removing the
 expiry date). The site accepting a `session-username` cookie without an expiry date *was*
 verified.
+
+---
+
+## 8. Readable steps: `test.step` vs Allure steps
+
+**Files:** all spec files in `tests/ui/`
+
+### 1. What it does
+A test is split into named business steps. The report then reads like a manual test case
+("Add Sauce Labs Backpack to the cart", "Overview shows the product and the correct
+totals"), and a failure points at the step that broke, not just at a line number.
+
+### 2. Playwright (our code)
+```ts
+// tests/ui/checkout/checkout.spec.ts
+await test.step('Overview shows the product and the correct totals', async () => {
+  await checkoutOverviewPage.expectLoaded();
+  await expect(checkoutOverviewPage.itemNames).toHaveText([product.name]);
+  await expect(checkoutOverviewPage.subtotalLabel).toHaveText(`Item total: ${formatUsd(itemTotal)}`);
+  await expect(checkoutOverviewPage.taxLabel).toHaveText(`Tax: ${formatUsd(tax)}`);
+  await expect(checkoutOverviewPage.totalLabel).toHaveText(`Total: ${formatUsd(total)}`);
+});
+```
+
+### 3. Selenium Java equivalent
+Selenium and JUnit have no step concept. The usual answer is Allure (extra dependency
+`io.qameta.allure:allure-junit5`, plus the Allure command line to build the report):
+
+```java
+import static io.qameta.allure.Allure.step;
+
+@Test
+void chk01_endToEndPurchaseOfOneItem() {
+    step("Overview shows the product and the correct totals", () -> {
+        overviewPage.expectLoaded();
+        assertEquals(List.of("Sauce Labs Backpack"), overviewPage.itemNames());
+        assertEquals("Item total: $29.99", overviewPage.subtotalText());
+        assertEquals("Tax: $2.40", overviewPage.taxText());
+        assertEquals("Total: $32.39", overviewPage.totalText());
+    });
+}
+
+// or as an annotation on a page-object method
+@Step("Fill customer information for {customer.firstName}")
+public void fillCustomer(Customer customer) { ... }
+```
+
+### 4. Key differences
+| | Playwright `test.step` | Allure steps |
+|---|---|---|
+| Installation | Built in | Extra dependency + AspectJ agent for `@Step` + report generator |
+| Shown in | HTML report, trace viewer, UI Mode | Allure report |
+| Evidence per step | Trace attaches DOM snapshot, screenshot, network per action | What you attach yourself (`Allure.addAttachment`) |
+| Style | Inline in the test | Inline lambda or `@Step` annotation on methods |
+
+### 5. Which is better here and why
+Playwright for zero setup and for the link to the trace viewer. Allure's report is richer
+for management reporting (history, trends, categories), and Allure can also be used with
+Playwright if that is ever needed.
+
+### 6. No direct equivalent?
+Correct, nothing built into Selenium/JUnit/TestNG. Workarounds: Allure (above),
+ExtentReports `test.log(...)`, or Cucumber, where each Gherkin line is a step.
+
+---
+
+## 9. Tags vs TestNG groups / JUnit tags
+
+**Files:** all spec files, `playwright.config.ts` (`grep` on the mobile project), `package.json` scripts
+
+### 1. What it does
+Each test is labelled `@smoke` or `@regression` so a subset can be run: a fast smoke check
+on every push, the full regression on demand.
+
+### 2. Playwright (our code)
+```ts
+test('AUTH-01: valid login (standard_user) lands on Products page', { tag: '@smoke' }, async ({ ... }) => {
+  // ...
+});
+```
+```bash
+npx playwright test --grep @smoke          # only smoke      (npm run test:smoke)
+npx playwright test --grep @regression     # only regression (npm run test:regression)
+npx playwright test --grep-invert @smoke   # everything except smoke
+```
+```ts
+// playwright.config.ts: the mobile project runs only smoke tests (MOB-01)
+{ name: 'mobile-chrome', use: { ...devices['Pixel 7'] }, grep: /@smoke/ }
+```
+
+### 3. Selenium Java equivalent
+```java
+// JUnit 5
+@Test
+@Tag("smoke")
+void auth01_validLoginLandsOnProductsPage() { ... }
+// run: mvn test -Dgroups=smoke          exclude: mvn test -DexcludedGroups=smoke
+
+// TestNG
+@Test(groups = {"smoke"})
+public void auth01_validLoginLandsOnProductsPage() { ... }
+// run: mvn test -Dgroups=smoke
+```
+```xml
+<!-- or in testng.xml -->
+<test name="smoke">
+  <groups><run><include name="smoke"/></run></groups>
+  <packages><package name="tests.ui.*"/></packages>
+</test>
+```
+
+### 4. Key differences
+- Same idea and same power in both. Tags belong to the test runner (Playwright Test,
+  JUnit, TestNG), not to Selenium itself.
+- Playwright tags appear in the test title in the report (`... @smoke`) and can be combined
+  per project in the config, as we do for mobile.
+- TestNG groups can also declare dependencies between groups (`dependsOnGroups`);
+  Playwright deliberately has nothing similar because tests must be independent.
+
+### 5. Which is better here and why
+A tie. Use whichever runner you have; the practice (tag everything, keep smoke small and
+fast) matters more than the syntax.
+
+### 6. No direct equivalent?
+Not applicable; both support it.
