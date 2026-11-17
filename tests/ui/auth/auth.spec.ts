@@ -152,11 +152,11 @@ test.describe('Authentication - starting from the saved session', () => {
    *       wait.until(ExpectedConditions.urlToBe(baseUrl + "/"));
    *       assertNull(driver.manage().getCookieNamed("session-username"));
    *       driver.get(baseUrl + "/inventory.html");
+   *       wait.until(ExpectedConditions.urlToBe(baseUrl + "/"));
    *       WebElement error = wait.until(ExpectedConditions.visibilityOfElementLocated(
    *           By.cssSelector("[data-test='error']")));
    *       assertEquals("Epic sadface: You can only access '/inventory.html' when you are logged in.",
    *           error.getText());
-   *       assertEquals(baseUrl + "/", driver.getCurrentUrl());
    *   }
    *
    * DIFFERENCE: The test begins on the Products page without logging in (storageState).
@@ -186,6 +186,9 @@ test.describe('Authentication - starting from the saved session', () => {
 
     await test.step('Opening the Products page directly is blocked', async () => {
       await inventoryPage.open();
+      // First wait until the application has sent us back to the login address, then
+      // read the message. This makes the order of events explicit: redirect, then error.
+      await expect(page).toHaveURL('/');
       await expect(loginPage.errorMessage).toHaveText(restrictedPageError('/inventory.html'));
       await loginPage.expectLoaded();
       await expect(inventoryPage.items).toHaveCount(0);
